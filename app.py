@@ -565,32 +565,26 @@ CSS = """
     .trading-header h1 { margin: 0; font-size: 1.1rem; font-weight: 700; color: #e6edf3; }
     .trading-header .sub { color: #6e7681; font-size: 0.75rem; font-weight: 400; }
 
-    /* One-row bar: ticker + refresh (used inside Market tab) */
-    .top-bar {
+    /* Unified stats bar: portfolio stats + refresh meta in one row */
+    .stats-bar {
         display: flex;
         align-items: center;
         justify-content: space-between;
+        background: #161b22;
+        border: 1px solid #21262d;
+        border-radius: 8px;
+        padding: 0.6rem 1rem;
+        margin-bottom: 0.75rem;
         gap: 1rem;
-        flex-wrap: wrap;
-        padding: 0.6rem 0;
-        margin-bottom: 0.75rem;
-        border-bottom: 1px solid #21262d;
     }
-    .ticker-strip {
-        display: flex;
-        gap: 1.25rem;
-        align-items: baseline;
-        flex-wrap: wrap;
-        padding-bottom: 0.5rem;
-        border-bottom: 1px solid #21262d;
-        margin-bottom: 0.75rem;
-    }
-    .ticker-item { display: flex; flex-direction: column; gap: 0; min-width: 4rem; }
+    .stats-bar-left { display: flex; gap: 1.5rem; align-items: center; flex-wrap: wrap; }
+    .stats-bar-right { text-align: right; white-space: nowrap; }
+    .stats-bar-meta { color: #6e7681; font-size: 0.7rem; }
+    .ticker-item { display: inline-flex; flex-direction: column; gap: 0; min-width: 3.5rem; }
     .ticker-item-change { min-width: 7rem; }
     .ticker-change-wrap { display: inline-flex; align-items: center; }
-    .ticker-label { color: #6e7681; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.04em; }
-    .ticker-value { color: #e6edf3; font-size: 1.1rem; font-weight: 700; font-variant-numeric: tabular-nums; }
-    .top-bar-meta { color: #6e7681; font-size: 0.75rem; display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+    .ticker-label { color: #6e7681; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.04em; line-height: 1; }
+    .ticker-value { color: #e6edf3; font-size: 1.05rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.4; }
 
     /* Trading cards - smaller, 4 fit per row on wide screens */
     .trading-card {
@@ -736,26 +730,25 @@ def main():
                 total_qty = sum(r["qty"] for r in rows)
                 change_badge = _portfolio_change_html(port_delta, port_pct)
                 next_refresh = max(0, int(cache_ttl - elapsed))
-                next_str = f"{next_refresh // 60}m {next_refresh % 60}s" if next_refresh > 0 else "soon"
+                next_str = f"{next_refresh // 60}m {next_refresh % 60}s" if next_refresh > 0 else "now"
                 last_str = time.strftime("%H:%M UTC", time.gmtime())
 
-                # One clean top row: ticker | refresh + meta
-                t1, t2 = st.columns([4, 1])
-                with t1:
-                    st.markdown(
-                        f'<div class="ticker-strip">'
-                        f'<div class="ticker-item"><span class="ticker-label">Portfolio</span><span class="ticker-value">${total_val:,.2f}</span></div>'
-                        f'<div class="ticker-item ticker-item-change"><span class="ticker-label">Change</span><span class="ticker-change-wrap">{change_badge}</span></div>'
-                        f'<div class="ticker-item"><span class="ticker-label">Items</span><span class="ticker-value">{len(rows)}</span></div>'
-                        f'<div class="ticker-item"><span class="ticker-label">Qty</span><span class="ticker-value">{total_qty}</span></div>'
-                        f'</div>',
-                        unsafe_allow_html=True,
-                    )
-                with t2:
-                    if st.button("🔄 Refresh", use_container_width=True):
-                        st.cache_data.clear()
-                        st.rerun()
-                    st.caption(f"Next {next_str} · Last {last_str}")
+                # Single unified stats bar (all HTML, no columns)
+                st.markdown(
+                    f'<div class="stats-bar">'
+                    f'<div class="stats-bar-left">'
+                    f'<div class="ticker-item"><span class="ticker-label">Portfolio</span><span class="ticker-value">${total_val:,.2f}</span></div>'
+                    f'<div class="ticker-item ticker-item-change"><span class="ticker-label">Change</span><span class="ticker-change-wrap">{change_badge}</span></div>'
+                    f'<div class="ticker-item"><span class="ticker-label">Items</span><span class="ticker-value">{len(rows)}</span></div>'
+                    f'<div class="ticker-item"><span class="ticker-label">Qty</span><span class="ticker-value">{total_qty}</span></div>'
+                    f'</div>'
+                    f'<div class="stats-bar-right"><span class="stats-bar-meta">Next {next_str} · Last {last_str}</span></div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+                if st.button("🔄 Refresh prices", use_container_width=False):
+                    st.cache_data.clear()
+                    st.rerun()
 
                 # ── Trading card grid (4 per row on wide screens) ──
                 n_cols = 4
