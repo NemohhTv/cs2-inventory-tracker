@@ -36,8 +36,22 @@ CSFLOAT_LISTINGS_URL = "https://csfloat.com/api/v1/listings"
 # Rate-limit tunables
 # ---------------------------------------------------------------------------
 PRICE_DELAY_SEC = float(os.getenv("PRICE_DELAY_SEC", "3.0"))
-CACHE_TTL_SEC = int(os.getenv("CSFLOAT_CACHE_TTL_SEC", "1200"))
+CACHE_TTL_OVERRIDE = os.getenv("CSFLOAT_CACHE_TTL_SEC", "").strip()
 MAX_ITEMS = int(os.getenv("CSFLOAT_MAX_ITEMS", "40"))
+MIN_REFRESH_COOLDOWN = 60  # manual refresh cooldown in seconds
+
+
+def _auto_cache_ttl(n_items: int) -> int:
+    """Scale cache TTL based on watchlist size to balance speed vs rate limits."""
+    if CACHE_TTL_OVERRIDE:
+        return int(CACHE_TTL_OVERRIDE)
+    if n_items <= 5:
+        return 300     # 5 min
+    if n_items <= 15:
+        return 600     # 10 min
+    if n_items <= 30:
+        return 900     # 15 min
+    return 1200        # 20 min
 
 # =========================================================================
 # Settings
@@ -253,10 +267,25 @@ def _fetch_csfloat(name: str) -> tuple[float | None, bool]:
 
 
 # =========================================================================
-# Combined data fetch (cached)
+# Combined data fetch (cached — TTL managed manually for dynamic scaling)
 # =========================================================================
-@st.cache_data(ttl=CACHE_TTL_SEC, show_spinner="Fetching prices…")
-def fetch_watchlist_data(watchlist: tuple[str, ...], steam_id: str) -> tuple[list[dict], list[str]]:
+LAST_FETCH_FILE = os.path.join(DATA_DIR, "last_fetch_ts.json")
+
+
+def _should_refetch(n_items: int) -> bool:
+    """Check if enough time has passed since the last fetch."""
+    ttl = _auto_cache_ttl(n_items)
+    ts_data = _read_json(LAST_FETCH_FILE)
+    last = ts_data.get("ts", 0)
+    return (time.time() - last) >= ttl
+
+
+def _mark_fetched():
+    _write_json(LAST_FETCH_FILE, {"ts": time.time()})
+
+
+@st.cache_data(ttl=300, show_spinner="Fetching prices…")
+def fetch_watchlist_data(watchlist: tuple[str, ...], steam_id: str, _cache_bust: int = 0) -> tuple[list[dict], list[str]]:
     if not watchlist:
         return [], []
 
@@ -354,6 +383,7 @@ def fetch_watchlist_data(watchlist: tuple[str, ...], steam_id: str) -> tuple[lis
     if len(batch) < len(watchlist):
         warnings.append(f"Showing {len(batch)} of {len(watchlist)} items (rate-limit cap).")
 
+    _mark_fetched()
     return rows, warnings
 
 
@@ -441,7 +471,8 @@ def render_sidebar():
         st.divider()
         st.caption(f"Steam ID: {'Set' if get_steam_id() else 'Not set'}")
         st.caption(f"CSFloat key: {'Set' if get_csfloat_key() else 'Not set'}")
-        st.caption(f"Cache: {CACHE_TTL_SEC // 60} min  ·  Delay: {PRICE_DELAY_SEC}s")
+        n = len(get_watchlist())
+        st.caption(f"Auto-refresh: {_auto_cache_ttl(n) // 60} min ({n} items)  ·  Delay: {PRICE_DELAY_SEC}s")
 
 
 # =========================================================================
@@ -468,9 +499,32 @@ def main():
             st.info("Your watchlist is empty. Go to **My Inventory** to browse and add items, "
                     "or use **Manage Watchlist** to add them manually.")
         else:
-            rows, warnings = fetch_watchlist_data(tuple(watchlist), steam_id)
+            cache_ttl = _auto_cache_ttl(len(watchlist))
+
+            # Use _cache_bust to force refetch when TTL expires or user clicks refresh
+            ts_data = _read_json(LAST_FETCH_FILE)
+            last_ts = ts_data.get("ts", 0)
+            elapsed = time.time() - last_ts if last_ts else 999999
+            cache_bust = int(last_ts) if elapsed < cache_ttl else int(time.time())
+
+            # Refresh controls
+            rc1, rc2, rc3 = st.columns([1, 1, 4])
+            with rc1:
+                if st.button("🔄 Refresh now", use_container_width=True):
+                    st.cache_data.clear()
+                    st.rerun()
+            with rc2:
+                next_refresh = max(0, int(cache_ttl - elapsed))
+                if next_refresh > 0:
+                    st.caption(f"Next auto-refresh in {next_refresh // 60}m {next_refresh % 60}s")
+                else:
+                    st.caption("Refreshing…")
+            with rc3:
+                st.caption(f"Auto-refresh: {cache_ttl // 60} min ({len(watchlist)} items)")
+
+            rows, warnings = fetch_watchlist_data(tuple(watchlist), steam_id, _cache_bust=cache_bust)
             ts = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
-            st.caption(f"Last refreshed: {ts}  ·  Cache: {CACHE_TTL_SEC // 60} min")
+            st.caption(f"Last fetched: {ts}")
             for w in warnings:
                 st.warning(w)
 
