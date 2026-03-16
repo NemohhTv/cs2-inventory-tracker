@@ -518,90 +518,113 @@ def _trading_card_html(r: dict) -> str:
     else:
         chg = '<span class="chg-badge chg-none"><span class="chg-arrow">—</span><span class="chg-pct">No data</span></span>'
 
-    steam_str = f'${r["steam_price"]:,.2f}' if r.get("steam_price") is not None else "—"
-    cf_str = f'${r["cf_price"]:,.2f}' if r.get("cf_price") is not None else "—"
-    sources = f'<a href="{mkt}" target="_blank" class="card-link">Steam</a> {steam_str} · <a href="{cf}" target="_blank" class="card-link">CSFloat</a> {cf_str}'
-
     qty = r["qty"]
     total = r["total"]
-    qty_str = f"Qty: {qty}" if qty > 0 else "Not in inventory"
-    val_str = f"${total:,.2f}" if total else "—"
-    footer = f"{qty_str} · Value {val_str}"
+    qty_str = f"Qty: {qty}" if qty > 0 else "Not owned"
+    val_str = f"Value ${total:,.2f}" if total else ""
+    footer_parts = [qty_str]
+    if val_str:
+        footer_parts.append(val_str)
+    footer = " · ".join(footer_parts)
 
     return f"""
     <div class="trading-card">
         <div class="card-img-wrap">{img_block}</div>
-        <a href="{mkt}" target="_blank" class="card-name">{name_esc} ↗</a>
+        <a href="{mkt}" target="_blank" class="card-name">{name_esc}</a>
         <div class="card-price-row">{price_str} {chg}</div>
-        <div class="card-sources">{sources}</div>
         <div class="card-footer">{footer}</div>
     </div>"""
 
 
 CSS = """
 <style>
-    /* Hide Streamlit's built-in toolbar so it doesn't overlap the header */
+    /* ── Reset Streamlit chrome ──────────────────────────── */
     [data-testid="stToolbar"] { display: none !important; }
-    [data-testid="stHeader"] { height: 0 !important; min-height: 0 !important; padding: 0 !important; }
-    /* Base */
+    [data-testid="stHeader"]  { background: transparent !important; }
+    header[data-testid="stHeader"] { pointer-events: none; }
     .stApp { background: #0d1117; }
-    .block-container { padding-top: 0.75rem !important; padding-bottom: 2rem !important; max-width: 100% !important; }
-    [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #161b22 0%, #0d1117 100%);
-        border-right: 1px solid #21262d;
+    .block-container {
+        padding-top: 0.5rem !important;
+        padding-bottom: 2rem !important;
+        max-width: 100% !important;
     }
-    [data-testid="stSidebar"] .stMarkdown { color: #8b949e; }
-    [data-testid="stSidebar"] [data-testid="collapsedControl"] { top: 0.5rem; }
 
-    /* Header */
-    .trading-header {
-        background: #161b22;
+    /* ── Tabs ────────────────────────────────────────────── */
+    [data-testid="stTabs"] > div:first-child {
+        background: transparent;
         border-bottom: 1px solid #21262d;
-        border-radius: 0 0 8px 8px;
-        padding: 0.6rem 1rem 0.6rem 0;
-        margin: 0 0 0.75rem 0;
-        display: flex;
-        align-items: baseline;
-        gap: 0.5rem;
     }
-    .trading-header h1 { margin: 0; font-size: 1.1rem; font-weight: 700; color: #e6edf3; white-space: nowrap; }
-    .trading-header .sub { color: #6e7681; font-size: 0.75rem; font-weight: 400; white-space: nowrap; }
+    [data-testid="stTabs"] [role="tab"] {
+        color: #8b949e;
+        font-size: 0.85rem;
+        padding: 0.5rem 1rem;
+    }
+    [data-testid="stTabs"] [aria-selected="true"] {
+        color: #e6edf3;
+        font-weight: 600;
+        border-bottom-color: #58a6ff !important;
+    }
 
-    /* Unified stats bar: portfolio stats + refresh meta in one row */
+    /* ── Stats bar ──────────────────────────────────────── */
     .stats-bar {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        background: #161b22;
+        background: linear-gradient(135deg, #161b22 0%, #1c2129 100%);
         border: 1px solid #21262d;
-        border-radius: 8px;
-        padding: 0.6rem 1rem;
+        border-radius: 10px;
+        padding: 0.75rem 1.25rem;
         margin-bottom: 0.75rem;
         gap: 1rem;
     }
-    .stats-bar-left { display: flex; gap: 1.5rem; align-items: center; flex-wrap: wrap; }
+    .stats-bar-left { display: flex; gap: 2rem; align-items: center; flex-wrap: wrap; }
     .stats-bar-right { text-align: right; white-space: nowrap; }
-    .stats-bar-meta { color: #6e7681; font-size: 0.7rem; }
-    .ticker-item { display: inline-flex; flex-direction: column; gap: 0; min-width: 3.5rem; }
-    .ticker-item-change { min-width: 7rem; }
+    .stats-bar-meta { color: #484f58; font-size: 0.7rem; }
+    .ticker-item {
+        display: inline-flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 4rem;
+    }
+    .ticker-item-change { min-width: 8rem; }
     .ticker-change-wrap { display: inline-flex; align-items: center; }
-    .ticker-label { color: #6e7681; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.04em; line-height: 1; }
-    .ticker-value { color: #e6edf3; font-size: 1.05rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.4; }
+    .ticker-label {
+        color: #484f58;
+        font-size: 0.6rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        line-height: 1;
+    }
+    .ticker-value {
+        color: #e6edf3;
+        font-size: 1.15rem;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        line-height: 1.4;
+    }
 
-    /* Trading cards - smaller, 4 fit per row on wide screens */
+    /* ── Trading cards ──────────────────────────────────── */
     .trading-card {
         background: #161b22;
         border: 1px solid #21262d;
-        border-radius: 8px;
-        padding: 0.75rem;
-        transition: border-color 0.15s, box-shadow 0.15s;
+        border-radius: 10px;
+        padding: 0.85rem;
+        transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
     }
-    .trading-card:hover { border-color: #30363d; box-shadow: 0 2px 8px rgba(0,0,0,0.25); }
+    .trading-card:hover {
+        border-color: #30363d;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+        transform: translateY(-2px);
+    }
     .card-img-wrap { text-align: center; margin-bottom: 0.5rem; }
-    .card-img { width: 100%; max-width: 140px; height: auto; border-radius: 6px; }
+    .card-img {
+        width: 100%; max-width: 150px; height: auto;
+        border-radius: 8px;
+        filter: drop-shadow(0 2px 6px rgba(0,0,0,0.3));
+    }
     .card-img-placeholder {
-        width: 100%; max-width: 140px; height: 84px; margin: 0 auto;
-        background: #21262d; border-radius: 6px;
+        width: 100%; max-width: 150px; height: 90px; margin: 0 auto;
+        background: #21262d; border-radius: 8px;
         display: flex; align-items: center; justify-content: center;
         color: #484f58; font-size: 1.75rem;
     }
@@ -609,77 +632,114 @@ CSS = """
         display: block;
         color: #58a6ff;
         font-weight: 600;
-        font-size: 0.8rem;
+        font-size: 0.82rem;
         text-decoration: none;
-        margin-bottom: 0.35rem;
-        line-height: 1.25;
+        margin-bottom: 0.4rem;
+        line-height: 1.3;
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .card-name:hover { text-decoration: underline; color: #79c0ff; }
-    .card-price-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem; flex-wrap: wrap; }
-    .card-price { color: #e6edf3; font-size: 1.2rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .card-price-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 0.35rem;
+        flex-wrap: wrap;
+    }
+    .card-price {
+        color: #e6edf3;
+        font-size: 1.25rem;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+    }
     .card-price-muted { color: #484f58; font-size: 1rem; }
-    /* Change badge: icon + % + optional $ delta */
-    .chg-badge { display: inline-flex; align-items: center; gap: 0.25rem; font-variant-numeric: tabular-nums;
-                  padding: 0.2rem 0.4rem; border-radius: 6px; font-weight: 600; }
-    .chg-arrow { font-size: 1.1rem; line-height: 1; }
-    .chg-pct { font-size: 0.85rem; }
-    .chg-delta { font-size: 0.75rem; opacity: 0.95; }
-    .chg-badge.chg-up { color: #3fb950; background: rgba(63, 185, 80, 0.15); }
-    .chg-badge.chg-up .chg-arrow { font-size: 1.25rem; }
+
+    /* Change badges */
+    .chg-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        font-variant-numeric: tabular-nums;
+        padding: 0.2rem 0.45rem;
+        border-radius: 6px;
+        font-weight: 600;
+    }
+    .chg-arrow  { font-size: 1.1rem; line-height: 1; }
+    .chg-pct    { font-size: 0.85rem; }
+    .chg-delta  { font-size: 0.75rem; opacity: 0.9; }
+    .chg-badge.chg-up   { color: #3fb950; background: rgba(63, 185, 80, 0.15); }
     .chg-badge.chg-down { color: #f85149; background: rgba(248, 81, 73, 0.12); }
-    .chg-badge.chg-down .chg-arrow { font-size: 1.1rem; }
     .chg-badge.chg-same { color: #d4a72c; background: rgba(212, 167, 44, 0.12); }
     .chg-badge.chg-same .chg-arrow { font-size: 0.65rem; }
     .chg-badge.chg-none { color: #6e7681; background: rgba(110, 118, 129, 0.1); font-weight: 500; }
     .chg-badge.chg-none .chg-pct { font-size: 0.75rem; }
-    .card-sources { color: #8b949e; font-size: 0.7rem; margin-bottom: 0.35rem; }
-    .card-sources a { color: #58a6ff; text-decoration: none; }
-    .card-sources a:hover { text-decoration: underline; }
-    .card-footer { color: #6e7681; font-size: 0.75rem; margin-bottom: 0.25rem; }
 
-    /* Tabs */
-    [data-testid="stTabs"] > div:first-child { background: transparent; border-bottom: 1px solid #21262d; }
-    [data-testid="stTabs"] [role="tab"] { color: #8b949e; }
-    [data-testid="stTabs"] [aria-selected="true"] { color: #e6edf3; font-weight: 600; }
+    .card-footer {
+        color: #6e7681;
+        font-size: 0.75rem;
+        padding-top: 0.25rem;
+        border-top: 1px solid #21262d;
+        margin-top: 0.25rem;
+    }
 
-    /* Metrics */
+    /* ── Metrics ─────────────────────────────────────────── */
     div[data-testid="stMetricValue"] { color: #e6edf3; font-variant-numeric: tabular-nums; }
     div[data-testid="stMetricLabel"] { color: #8b949e; }
 
-    /* Inventory tab cards (reuse trading look) */
-    .card { background: #161b22; border: 1px solid #21262d; border-radius: 10px; padding: 1rem; margin-bottom: 0.5rem; }
-    .placeholder-img { width: 160px; height: 100px; background: #21262d; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #484f58; font-size: 2rem; }
+    /* ── Inventory tab ───────────────────────────────────── */
+    .card {
+        background: #161b22;
+        border: 1px solid #21262d;
+        border-radius: 10px;
+        padding: 1rem;
+        margin-bottom: 0.5rem;
+    }
+    .placeholder-img {
+        width: 160px; height: 100px;
+        background: #21262d; border-radius: 8px;
+        display: flex; align-items: center; justify-content: center;
+        color: #484f58; font-size: 2rem;
+    }
     .item-title { font-weight: 600; font-size: 0.9rem; color: #e6edf3; }
+
+    /* ── Settings tab ────────────────────────────────────── */
+    .stTextInput input {
+        background: #0d1117 !important;
+        border-color: #30363d !important;
+        color: #e6edf3 !important;
+    }
 </style>
 """
 
 
 # =========================================================================
-# Sidebar
+# Settings tab renderer
 # =========================================================================
-def render_sidebar():
-    with st.sidebar:
-        st.header("Settings")
-        s = load_settings()
+def render_settings_tab():
+    st.subheader("Settings")
+    s = load_settings()
+    c1, c2 = st.columns(2)
+    with c1:
         cur_sid = s.get("steam_id") or os.getenv("STEAM_ID", "")
-        cur_cf = s.get("csfloat_api_key") or os.getenv("CSFLOAT_API_KEY", "")
         new_sid = st.text_input("Steam ID (64-bit)", value=cur_sid,
                                 placeholder="76561198012345678",
-                                help="Get yours at steamid.io")
+                                help="Get yours from steamid.io")
+    with c2:
+        cur_cf = s.get("csfloat_api_key") or os.getenv("CSFLOAT_API_KEY", "")
         new_cf = st.text_input("CSFloat API key (optional)", value=cur_cf,
                                type="password",
-                               help="Enables CSFloat pricing column")
-        if st.button("Save settings", use_container_width=True):
-            save_settings({"steam_id": new_sid.strip(), "csfloat_api_key": new_cf.strip()})
-            st.cache_data.clear()
-            st.success("Saved!")
-            st.rerun()
-        st.divider()
-        st.caption(f"Steam ID: {'Set' if get_steam_id() else 'Not set'}")
-        st.caption(f"CSFloat key: {'Set' if get_csfloat_key() else 'Not set'}")
-        n = len(get_watchlist())
-        st.caption(f"Auto-refresh: {_auto_cache_ttl(n) // 60} min ({n} items)  ·  Delay: {PRICE_DELAY_SEC}s")
+                               help="Enables CSFloat pricing alongside Steam Market")
+    if st.button("Save settings"):
+        save_settings({"steam_id": new_sid.strip(), "csfloat_api_key": new_cf.strip()})
+        st.cache_data.clear()
+        st.success("Saved!")
+        st.rerun()
+    st.divider()
+    n = len(get_watchlist())
+    sc1, sc2, sc3 = st.columns(3)
+    sc1.metric("Steam ID", "Connected" if get_steam_id() else "Not set")
+    sc2.metric("CSFloat key", "Connected" if get_csfloat_key() else "Not set")
+    sc3.metric("Auto-refresh", f"{_auto_cache_ttl(n) // 60} min")
 
 
 # =========================================================================
@@ -687,30 +747,20 @@ def render_sidebar():
 # =========================================================================
 def main():
     st.set_page_config(page_title="CS2 Inventory Tracker", page_icon="🎯",
-                       layout="wide", initial_sidebar_state="auto")
+                       layout="wide", initial_sidebar_state="collapsed")
     st.markdown(CSS, unsafe_allow_html=True)
-    render_sidebar()
 
     steam_id = get_steam_id()
     watchlist = get_watchlist()
     watchlist_set = set(watchlist)
 
-    # Compact top bar
-    st.markdown(
-        '<div class="trading-header">'
-        '<h1>CS2 Inventory Tracker</h1>'
-        '<span class="sub">Steam Market & CSFloat · Portfolio tracker</span>'
-        '</div>',
-        unsafe_allow_html=True,
-    )
-
-    tab_dash, tab_inv, tab_manage = st.tabs(["Market", "Inventory", "Watchlist"])
+    tab_dash, tab_inv, tab_manage, tab_settings = st.tabs(["Portfolio", "Inventory", "Watchlist", "Settings"])
 
     # ── Dashboard ─────────────────────────────────────────────
     with tab_dash:
         if not watchlist:
-            st.info("Your watchlist is empty. Go to **My Inventory** to browse and add items, "
-                    "or use **Manage Watchlist** to add them manually.")
+            st.info("Your watchlist is empty. Go to the **Inventory** tab to browse and add items, "
+                    "or use the **Watchlist** tab to add them manually.")
         else:
             cache_ttl = _auto_cache_ttl(len(watchlist))
 
@@ -799,7 +849,7 @@ def main():
     # ── My Inventory ──────────────────────────────────────────
     with tab_inv:
         if not steam_id:
-            st.warning("Open the **sidebar** (arrow top-left) and enter your **Steam 64-bit ID** to load your inventory.")
+            st.warning("Go to the **Settings** tab and enter your **Steam 64-bit ID** to load your inventory.")
         else:
             inv = get_inventory_items(steam_id)
             if not inv:
@@ -858,7 +908,7 @@ def main():
                         st.cache_data.clear()
                         st.rerun()
         else:
-            st.info("Watchlist is empty. Add items from **My Inventory** or type a name below.")
+            st.info("Watchlist is empty. Add items from the **Inventory** tab or type a name below.")
         st.divider()
         st.subheader("Add custom item")
         st.caption("Enter the exact market hash name (copy from Steam Market URL or CSFloat).")
@@ -873,6 +923,10 @@ def main():
                 st.rerun()
             else:
                 st.warning("Enter an item name first.")
+
+    # ── Settings ──────────────────────────────────────────────
+    with tab_settings:
+        render_settings_tab()
 
 
 if __name__ == "__main__":
