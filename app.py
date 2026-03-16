@@ -24,6 +24,7 @@ WATCHLIST_FILE = os.path.join(DATA_DIR, "watchlist.txt")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 IMAGE_CACHE_FILE = os.path.join(DATA_DIR, "image_cache.json")
 PRICE_HISTORY_FILE = os.path.join(DATA_DIR, "price_history.json")
+COST_BASIS_FILE = os.path.join(DATA_DIR, "cost_basis.json")
 
 # ---------------------------------------------------------------------------
 # API URLs
@@ -119,6 +120,30 @@ def add_to_watchlist(item: str):
     cur = get_watchlist()
     if item.strip() and item.strip() not in cur:
         save_watchlist(cur + [item.strip()])
+
+
+# =========================================================================
+# Cost basis (purchase price tracking)
+# =========================================================================
+def load_cost_basis() -> dict[str, float]:
+    data = _read_json(COST_BASIS_FILE)
+    return {k: float(v) for k, v in data.items() if v}
+
+
+def save_cost_basis(data: dict[str, float]):
+    _write_json(COST_BASIS_FILE, data)
+
+
+def set_cost_basis(item: str, price: float):
+    cb = load_cost_basis()
+    cb[item] = round(price, 2)
+    save_cost_basis(cb)
+
+
+def remove_cost_basis(item: str):
+    cb = load_cost_basis()
+    cb.pop(item, None)
+    save_cost_basis(cb)
 
 
 def remove_from_watchlist(item: str):
@@ -598,11 +623,31 @@ def _trading_card_html(r: dict, source: str = "steam") -> str:
     qty_val = str(qty) if qty > 0 else "0"
     total_val = f"${hero_total:,.2f}" if hero_total else "—"
 
+    # P/L vs cost basis
+    cost = r.get("cost_basis")
+    pl_html = ""
+    if cost is not None and hero_price is not None:
+        pl = hero_price - cost
+        pl_pct = (pl / cost) * 100 if cost > 0 else 0
+        if pl > 0:
+            pl_html = (f'<div class="card-pl pl-profit">'
+                       f'P/L +${pl:,.2f} <span class="pl-pct">(+{pl_pct:.1f}%)</span>'
+                       f'</div>')
+        elif pl < 0:
+            pl_html = (f'<div class="card-pl pl-loss">'
+                       f'P/L −${abs(pl):,.2f} <span class="pl-pct">({pl_pct:.1f}%)</span>'
+                       f'</div>')
+        else:
+            pl_html = '<div class="card-pl pl-even">P/L $0.00 (0.0%)</div>'
+    elif cost is not None:
+        pl_html = f'<div class="card-pl pl-even">Bought @ ${cost:,.2f}</div>'
+
     return f"""
     <div class="trading-card">
         <div class="card-img-wrap">{img_block}</div>
         <a href="{mkt}" target="_blank" class="card-name">{name_esc}</a>
         <div class="card-price-row">{price_str} {chg}</div>
+        {pl_html}
         <div class="card-bottom">
             <div class="card-sources">
                 <a href="{mkt}" target="_blank" class="src-pill src-steam{active_s}" title="Steam Market">
@@ -764,6 +809,19 @@ CSS = """
     .chg-badge.chg-same .chg-arrow { font-size: 0.65rem; }
     .chg-badge.chg-none { color: #6e7681; background: rgba(110, 118, 129, 0.1); font-weight: 500; }
     .chg-badge.chg-none .chg-pct { font-size: 0.75rem; }
+
+    /* P/L line */
+    .card-pl {
+        font-size: 0.73rem;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        padding: 0.2rem 0;
+        margin-bottom: 0.15rem;
+    }
+    .card-pl .pl-pct { opacity: 0.75; font-weight: 500; }
+    .pl-profit { color: #3fb950; }
+    .pl-loss   { color: #f85149; }
+    .pl-even   { color: #6e7681; }
 
     /* Card bottom section */
     .card-bottom {
@@ -1048,6 +1106,11 @@ def main():
                         key=lambda r: r.get("steam_pct") if r.get("steam_pct") is not None else -9999,
                         reverse=True)
 
+                # Inject cost basis into rows for P/L display
+                cb = load_cost_basis()
+                for r in display_rows:
+                    r["cost_basis"] = cb.get(r["name"])
+
                 if not display_rows:
                     st.info("No items match your filters.")
 
@@ -1174,19 +1237,35 @@ def main():
     with tab_manage:
         st.subheader("Current watchlist")
         if watchlist:
+            cb = load_cost_basis()
             for wi, item in enumerate(watchlist):
                 img = get_item_image_url(item)
-                c1, c2, c3 = st.columns([1, 5, 1])
+                c1, c2, c3, c4 = st.columns([0.5, 3, 1.5, 0.7])
                 with c1:
                     if img:
-                        st.image(img, width=60)
+                        st.image(img, width=50)
                     else:
                         st.markdown("🔫")
                 with c2:
                     st.markdown(f"**[{item}]({market_url(item)})**")
                 with c3:
+                    cur_cost = cb.get(item, 0.0)
+                    new_cost = st.number_input(
+                        "Buy price", min_value=0.0, step=0.01,
+                        value=cur_cost, format="%.2f",
+                        key=f"cost_{wi}", label_visibility="collapsed",
+                        help="What you paid for this item",
+                    )
+                    if new_cost != cur_cost:
+                        if new_cost > 0:
+                            set_cost_basis(item, new_cost)
+                        else:
+                            remove_cost_basis(item)
+                        st.rerun()
+                with c4:
                     if st.button("Remove", key=f"mrm_{wi}", type="secondary"):
                         remove_from_watchlist(item)
+                        remove_cost_basis(item)
                         st.cache_data.clear()
                         st.rerun()
         else:
@@ -1194,12 +1273,21 @@ def main():
         st.divider()
         st.subheader("Add custom item")
         st.caption("Enter the exact market hash name (copy from Steam Market URL or CSFloat).")
-        custom = st.text_input("Market hash name",
-                               placeholder="e.g. AWP | Dragon Lore (Field-Tested)",
-                               key="custom_add")
+        ca1, ca2 = st.columns([3, 1])
+        with ca1:
+            custom = st.text_input("Market hash name",
+                                   placeholder="e.g. AWP | Dragon Lore (Field-Tested)",
+                                   key="custom_add")
+        with ca2:
+            custom_cost = st.number_input("Buy price ($)", min_value=0.0, step=0.01,
+                                          format="%.2f", key="custom_cost",
+                                          label_visibility="collapsed",
+                                          help="Optional: what you paid")
         if st.button("Add to watchlist", key="custom_btn", use_container_width=True):
             if custom and custom.strip():
                 add_to_watchlist(custom.strip())
+                if custom_cost > 0:
+                    set_cost_basis(custom.strip(), custom_cost)
                 st.cache_data.clear()
                 st.success(f"Added: {custom.strip()}")
                 st.rerun()
