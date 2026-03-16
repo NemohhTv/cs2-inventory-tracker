@@ -987,22 +987,8 @@ def main():
                 unwatched = [i for i in filtered if i["name"] not in watchlist_set]
                 watched_count = len(filtered) - len(unwatched)
 
-                bc1, bc2, bc3 = st.columns([2, 2, 3])
-                with bc1:
-                    st.caption(f"Showing {len(filtered)} items ({watched_count} tracked)")
-                with bc2:
-                    if unwatched:
-                        label = f"Add all {len(unwatched)} to watchlist" if not search else f"Add {len(unwatched)} filtered"
-                        if st.button(label, key="bulk_add", use_container_width=True):
-                            cur = get_watchlist()
-                            cur_set = set(cur)
-                            new_items = [i["name"] for i in unwatched if i["name"] not in cur_set]
-                            if new_items:
-                                save_watchlist(cur + new_items)
-                            st.rerun()
-                    else:
-                        st.caption("All shown items are tracked")
-
+                # Collect checkbox selections
+                selected: list[str] = []
                 for i in range(0, len(filtered), 3):
                     cols = st.columns(3, gap="medium")
                     for j, col in enumerate(cols):
@@ -1022,13 +1008,40 @@ def main():
                                         unsafe_allow_html=True)
                             st.caption(f"Qty: {it['qty']}")
                             if watched:
-                                st.success("⭐ On watchlist", icon="⭐")
+                                st.markdown(
+                                    '<span style="color:#3fb950;font-size:0.78rem;">⭐ Tracked</span>',
+                                    unsafe_allow_html=True,
+                                )
                             else:
-                                if st.button("⭐ Add", key=f"iadd_{idx}",
-                                             use_container_width=True):
-                                    add_to_watchlist(it["name"])
-                                    st.rerun()
+                                if st.checkbox("Select", key=f"isel_{idx}", label_visibility="visible"):
+                                    selected.append(it["name"])
                             st.markdown('</div>', unsafe_allow_html=True)
+
+                # Sticky action bar at the top (rendered after checkboxes so we know the count)
+                if selected:
+                    st.toast(f"{len(selected)} items selected")
+                act1, act2, act3 = st.columns([3, 2, 2])
+                with act1:
+                    st.caption(f"Showing {len(filtered)} items · {watched_count} tracked · {len(selected)} selected")
+                with act2:
+                    if selected:
+                        if st.button(f"Add {len(selected)} selected to watchlist", key="add_selected",
+                                     type="primary", use_container_width=True):
+                            cur = get_watchlist()
+                            cur_set = set(cur)
+                            new_items = [n for n in selected if n not in cur_set]
+                            if new_items:
+                                save_watchlist(cur + new_items)
+                            st.rerun()
+                with act3:
+                    if unwatched:
+                        if st.button(f"Add all {len(unwatched)}", key="bulk_add", use_container_width=True):
+                            cur = get_watchlist()
+                            cur_set = set(cur)
+                            new_items = [i["name"] for i in unwatched if i["name"] not in cur_set]
+                            if new_items:
+                                save_watchlist(cur + new_items)
+                            st.rerun()
 
     # ── Manage Watchlist ──────────────────────────────────────
     with tab_manage:
