@@ -443,6 +443,23 @@ def fetch_watchlist_data(watchlist: tuple[str, ...], steam_id: str, _cache_bust:
 # =========================================================================
 # UI helpers
 # =========================================================================
+_WEAR_TAGS = ["Factory New", "Minimal Wear", "Field-Tested", "Well-Worn", "Battle-Scarred"]
+
+
+def _parse_wear(name: str) -> str:
+    for w in _WEAR_TAGS:
+        if f"({w})" in name:
+            return w
+    return "N/A"
+
+
+def _parse_weapon_type(name: str) -> str:
+    """Extract the weapon/item type before the ' | ' separator."""
+    if " | " in name:
+        return name.split(" | ", 1)[0].strip()
+    return name.split("(", 1)[0].strip() or "Other"
+
+
 def _delta_html(delta: float | None, pct: float | None, prefix: str = "") -> str:
     """Return HTML for a price delta like '▲ +$5.38 (+3.5%)' in green/red."""
     if delta is None:
@@ -969,18 +986,69 @@ def main():
                     st.cache_data.clear()
                     st.rerun()
 
+                # ── Sort & Filter controls ──
+                fc1, fc2, fc3, fc4 = st.columns([2, 2, 2, 1])
+                with fc1:
+                    sort_by = st.selectbox(
+                        "Sort by",
+                        ["Price: High → Low", "Price: Low → High",
+                         "Name: A → Z", "Name: Z → A",
+                         "Wear", "Change %: High → Low"],
+                        key="dash_sort", label_visibility="collapsed",
+                    )
+                with fc2:
+                    all_wears = sorted({_parse_wear(r["name"]) for r in rows})
+                    wear_filter = st.multiselect("Wear", all_wears, default=all_wears,
+                                                 key="dash_wear", label_visibility="collapsed",
+                                                 placeholder="Filter by wear…")
+                with fc3:
+                    all_types = sorted({_parse_weapon_type(r["name"]) for r in rows})
+                    type_filter = st.multiselect("Type", all_types, default=all_types,
+                                                 key="dash_type", label_visibility="collapsed",
+                                                 placeholder="Filter by type…")
+                with fc4:
+                    hide_zero = st.checkbox("Hide qty 0", key="dash_hide0")
+
+                # Apply filters
+                display_rows = [r for r in rows
+                                if _parse_wear(r["name"]) in wear_filter
+                                and _parse_weapon_type(r["name"]) in type_filter
+                                and (not hide_zero or r["qty"] > 0)]
+
+                # Apply sort
+                _WEAR_ORDER = {"Factory New": 0, "Minimal Wear": 1, "Field-Tested": 2,
+                               "Well-Worn": 3, "Battle-Scarred": 4, "N/A": 5}
+                if sort_by == "Price: High → Low":
+                    display_rows.sort(key=lambda r: r["primary_price"] or 0, reverse=True)
+                elif sort_by == "Price: Low → High":
+                    display_rows.sort(key=lambda r: r["primary_price"] or 0)
+                elif sort_by == "Name: A → Z":
+                    display_rows.sort(key=lambda r: r["name"].lower())
+                elif sort_by == "Name: Z → A":
+                    display_rows.sort(key=lambda r: r["name"].lower(), reverse=True)
+                elif sort_by == "Wear":
+                    display_rows.sort(key=lambda r: _WEAR_ORDER.get(_parse_wear(r["name"]), 5))
+                elif sort_by == "Change %: High → Low":
+                    display_rows.sort(
+                        key=lambda r: r.get("steam_pct") if r.get("steam_pct") is not None else -9999,
+                        reverse=True)
+
+                if not display_rows:
+                    st.info("No items match your filters.")
+
                 # ── Trading card grid (4 per row on wide screens) ──
                 n_cols = 4
-                for i in range(0, len(rows), n_cols):
+                for i in range(0, len(display_rows), n_cols):
                     cols = st.columns(n_cols, gap="medium")
                     for j, col in enumerate(cols):
                         ri = i + j
-                        if ri >= len(rows):
+                        if ri >= len(display_rows):
                             break
-                        r = rows[ri]
+                        r = display_rows[ri]
                         with col:
                             st.markdown(_trading_card_html(r), unsafe_allow_html=True)
-                            if st.button("Remove from watchlist", key=f"drm_{ri}", type="secondary", use_container_width=True):
+                            if st.button("Remove from watchlist", key=f"drm_{r['name']}",
+                                         type="secondary", use_container_width=True):
                                 remove_from_watchlist(r["name"])
                                 st.cache_data.clear()
                                 st.rerun()
