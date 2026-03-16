@@ -463,15 +463,20 @@ def _trading_card_html(r: dict) -> str:
     else:
         price_str = '<span class="card-price-muted">—</span>'
 
+    # Change badge: up (green) / down (red) / same (yellow) / no data (gray)
     if pct is not None:
         if pct > 0:
-            chg = f'<span class="chg-up">▲ {pct:+.1f}%</span>'
+            d_str = f"+${abs(delta):,.2f}" if delta is not None and delta != 0 else ""
+            delta_span = f' <span class="chg-delta">{d_str}</span>' if d_str else ""
+            chg = f'<span class="chg-badge chg-up"><span class="chg-arrow">↑</span><span class="chg-pct">+{pct:.1f}%</span>{delta_span}</span>'
         elif pct < 0:
-            chg = f'<span class="chg-down">▼ {pct:.1f}%</span>'
+            d_str = f"−${abs(delta):,.2f}" if delta is not None and delta != 0 else ""
+            delta_span = f' <span class="chg-delta">{d_str}</span>' if d_str else ""
+            chg = f'<span class="chg-badge chg-down"><span class="chg-arrow">↓</span><span class="chg-pct">{pct:.1f}%</span>{delta_span}</span>'
         else:
-            chg = '<span class="chg-flat">— 0.0%</span>'
+            chg = '<span class="chg-badge chg-same"><span class="chg-arrow">●</span><span class="chg-pct">0.0%</span></span>'
     else:
-        chg = '<span class="chg-flat">—</span>'
+        chg = '<span class="chg-badge chg-none"><span class="chg-arrow">—</span><span class="chg-pct">No data</span></span>'
 
     steam_str = f'${r["steam_price"]:,.2f}' if r.get("steam_price") is not None else "—"
     cf_str = f'${r["cf_price"]:,.2f}' if r.get("cf_price") is not None else "—"
@@ -576,12 +581,23 @@ CSS = """
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .card-name:hover { text-decoration: underline; color: #79c0ff; }
-    .card-price-row { display: flex; align-items: baseline; gap: 0.4rem; margin-bottom: 0.25rem; flex-wrap: wrap; }
+    .card-price-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem; flex-wrap: wrap; }
     .card-price { color: #e6edf3; font-size: 1.2rem; font-weight: 700; font-variant-numeric: tabular-nums; }
     .card-price-muted { color: #484f58; font-size: 1rem; }
-    .chg-up { color: #3fb950; font-size: 0.8rem; font-weight: 600; }
-    .chg-down { color: #f85149; font-size: 0.8rem; font-weight: 600; }
-    .chg-flat { color: #8b949e; font-size: 0.75rem; }
+    /* Change badge: icon + % + optional $ delta */
+    .chg-badge { display: inline-flex; align-items: center; gap: 0.25rem; font-variant-numeric: tabular-nums;
+                  padding: 0.2rem 0.4rem; border-radius: 6px; font-weight: 600; }
+    .chg-arrow { font-size: 1.1rem; line-height: 1; }
+    .chg-pct { font-size: 0.85rem; }
+    .chg-delta { font-size: 0.75rem; opacity: 0.95; }
+    .chg-badge.chg-up { color: #3fb950; background: rgba(63, 185, 80, 0.15); }
+    .chg-badge.chg-up .chg-arrow { font-size: 1.25rem; }
+    .chg-badge.chg-down { color: #f85149; background: rgba(248, 81, 73, 0.12); }
+    .chg-badge.chg-down .chg-arrow { font-size: 1.1rem; }
+    .chg-badge.chg-same { color: #d4a72c; background: rgba(212, 167, 44, 0.12); }
+    .chg-badge.chg-same .chg-arrow { font-size: 0.65rem; }
+    .chg-badge.chg-none { color: #6e7681; background: rgba(110, 118, 129, 0.1); font-weight: 500; }
+    .chg-badge.chg-none .chg-pct { font-size: 0.75rem; }
     .card-sources { color: #8b949e; font-size: 0.7rem; margin-bottom: 0.35rem; }
     .card-sources a { color: #58a6ff; text-decoration: none; }
     .card-sources a:hover { text-decoration: underline; }
