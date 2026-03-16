@@ -495,87 +495,97 @@ def _trading_card_html(r: dict) -> str:
 
 CSS = """
 <style>
-    /* Base */
+    /* Base - full width, compact padding */
     .stApp { background: #0d1117; }
-    .stApp > div { padding-top: 0.5rem; }
+    .stApp > div[data-testid="stAppViewContainer"] { padding-top: 0; }
+    .block-container { padding-top: 1rem !important; padding-bottom: 2rem !important; max-width: 100% !important; }
     [data-testid="stSidebar"] {
         background: linear-gradient(180deg, #161b22 0%, #0d1117 100%);
         border-right: 1px solid #21262d;
     }
     [data-testid="stSidebar"] .stMarkdown { color: #8b949e; }
+    /* Collapse sidebar icon - smaller and aligned */
+    [data-testid="stSidebar"] [data-testid="collapsedControl"] { top: 0.5rem; }
 
-    /* Header strip */
+    /* Compact top bar: title + tagline in one line */
     .trading-header {
         background: #161b22;
         border-bottom: 1px solid #21262d;
-        padding: 0.75rem 1.25rem;
-        margin: -1rem -1rem 1rem -1rem;
+        padding: 0.5rem 0 0.75rem 0;
+        margin: -1rem -1rem 0 -1rem;
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+    }
+    .trading-header h1 { margin: 0; font-size: 1.1rem; font-weight: 700; color: #e6edf3; }
+    .trading-header .sub { color: #6e7681; font-size: 0.75rem; font-weight: 400; }
+
+    /* One-row bar: ticker + refresh (used inside Market tab) */
+    .top-bar {
         display: flex;
         align-items: center;
         justify-content: space-between;
+        gap: 1rem;
         flex-wrap: wrap;
-        gap: 0.5rem;
+        padding: 0.6rem 0;
+        margin-bottom: 0.75rem;
+        border-bottom: 1px solid #21262d;
     }
-    .trading-header h1 { margin: 0; font-size: 1.25rem; font-weight: 700; color: #e6edf3; }
-    .trading-header .sub { color: #8b949e; font-size: 0.8rem; margin-top: 2px; }
-
-    /* Portfolio ticker strip */
     .ticker-strip {
         display: flex;
-        gap: 1.5rem;
-        padding: 1rem 1.25rem;
-        background: #161b22;
-        border: 1px solid #21262d;
-        border-radius: 10px;
-        margin-bottom: 1.25rem;
+        gap: 1.25rem;
+        align-items: baseline;
         flex-wrap: wrap;
+        padding-bottom: 0.5rem;
+        border-bottom: 1px solid #21262d;
+        margin-bottom: 0.75rem;
     }
-    .ticker-item { display: flex; flex-direction: column; gap: 2px; }
-    .ticker-label { color: #8b949e; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
-    .ticker-value { color: #e6edf3; font-size: 1.35rem; font-weight: 700; font-variant-numeric: tabular-nums; }
-    .ticker-delta-up { color: #3fb950; font-size: 0.9rem; font-weight: 600; }
-    .ticker-delta-down { color: #f85149; font-size: 0.9rem; font-weight: 600; }
-    .ticker-delta-flat { color: #8b949e; font-size: 0.9rem; }
+    .ticker-item { display: flex; flex-direction: column; gap: 0; }
+    .ticker-label { color: #6e7681; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    .ticker-value { color: #e6edf3; font-size: 1.1rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .ticker-delta-up { color: #3fb950; font-size: 0.8rem; font-weight: 600; }
+    .ticker-delta-down { color: #f85149; font-size: 0.8rem; font-weight: 600; }
+    .ticker-delta-flat { color: #8b949e; font-size: 0.8rem; }
+    .top-bar-meta { color: #6e7681; font-size: 0.75rem; display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
 
-    /* Trading cards grid */
-    .cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+    /* Trading cards - smaller, 4 fit per row on wide screens */
     .trading-card {
         background: #161b22;
         border: 1px solid #21262d;
-        border-radius: 10px;
-        padding: 1rem;
+        border-radius: 8px;
+        padding: 0.75rem;
         transition: border-color 0.15s, box-shadow 0.15s;
     }
-    .trading-card:hover { border-color: #30363d; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
-    .card-img-wrap { text-align: center; margin-bottom: 0.75rem; }
-    .card-img { width: 100%; max-width: 200px; height: auto; border-radius: 8px; }
+    .trading-card:hover { border-color: #30363d; box-shadow: 0 2px 8px rgba(0,0,0,0.25); }
+    .card-img-wrap { text-align: center; margin-bottom: 0.5rem; }
+    .card-img { width: 100%; max-width: 140px; height: auto; border-radius: 6px; }
     .card-img-placeholder {
-        width: 100%; max-width: 200px; height: 120px; margin: 0 auto;
-        background: #21262d; border-radius: 8px;
+        width: 100%; max-width: 140px; height: 84px; margin: 0 auto;
+        background: #21262d; border-radius: 6px;
         display: flex; align-items: center; justify-content: center;
-        color: #484f58; font-size: 2.5rem;
+        color: #484f58; font-size: 1.75rem;
     }
     .card-name {
         display: block;
         color: #58a6ff;
         font-weight: 600;
-        font-size: 0.9rem;
+        font-size: 0.8rem;
         text-decoration: none;
-        margin-bottom: 0.5rem;
-        line-height: 1.3;
+        margin-bottom: 0.35rem;
+        line-height: 1.25;
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .card-name:hover { text-decoration: underline; color: #79c0ff; }
-    .card-price-row { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.35rem; flex-wrap: wrap; }
-    .card-price { color: #e6edf3; font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
-    .card-price-muted { color: #484f58; font-size: 1.2rem; }
-    .chg-up { color: #3fb950; font-size: 0.9rem; font-weight: 600; }
-    .chg-down { color: #f85149; font-size: 0.9rem; font-weight: 600; }
-    .chg-flat { color: #8b949e; font-size: 0.85rem; }
-    .card-sources { color: #8b949e; font-size: 0.75rem; margin-bottom: 0.5rem; }
+    .card-price-row { display: flex; align-items: baseline; gap: 0.4rem; margin-bottom: 0.25rem; flex-wrap: wrap; }
+    .card-price { color: #e6edf3; font-size: 1.2rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .card-price-muted { color: #484f58; font-size: 1rem; }
+    .chg-up { color: #3fb950; font-size: 0.8rem; font-weight: 600; }
+    .chg-down { color: #f85149; font-size: 0.8rem; font-weight: 600; }
+    .chg-flat { color: #8b949e; font-size: 0.75rem; }
+    .card-sources { color: #8b949e; font-size: 0.7rem; margin-bottom: 0.35rem; }
     .card-sources a { color: #58a6ff; text-decoration: none; }
     .card-sources a:hover { text-decoration: underline; }
-    .card-footer { color: #6e7681; font-size: 0.8rem; }
+    .card-footer { color: #6e7681; font-size: 0.75rem; margin-bottom: 0.25rem; }
 
     /* Tabs */
     [data-testid="stTabs"] > div:first-child { background: transparent; border-bottom: 1px solid #21262d; }
@@ -634,10 +644,11 @@ def main():
     watchlist = get_watchlist()
     watchlist_set = set(watchlist)
 
-    # Header bar (trading-app style)
+    # Compact top bar
     st.markdown(
         '<div class="trading-header">'
-        '<div><h1>CS2 Inventory Tracker</h1><div class="sub">Track prices · Steam Market & CSFloat · Portfolio value</div></div>'
+        '<h1>CS2 Inventory Tracker</h1>'
+        '<span class="sub">Steam Market & CSFloat · Portfolio tracker</span>'
         '</div>',
         unsafe_allow_html=True,
     )
@@ -658,49 +669,42 @@ def main():
             elapsed = time.time() - last_ts if last_ts else 999999
             cache_bust = int(last_ts) if elapsed < cache_ttl else int(time.time())
 
-            # Refresh bar
-            rc1, rc2, rc3 = st.columns([1, 2, 3])
-            with rc1:
-                if st.button("🔄 Refresh", use_container_width=True):
-                    st.cache_data.clear()
-                    st.rerun()
-            with rc2:
-                next_refresh = max(0, int(cache_ttl - elapsed))
-                if next_refresh > 0:
-                    st.caption(f"Next refresh in {next_refresh // 60}m {next_refresh % 60}s")
-                else:
-                    st.caption("Refreshing…")
-            with rc3:
-                st.caption(f"Last fetched: {time.strftime('%H:%M UTC', time.gmtime())} · Auto-refresh every {cache_ttl // 60} min")
-
             rows, warnings = fetch_watchlist_data(tuple(watchlist), steam_id, _cache_bust=cache_bust)
             for w in warnings:
                 st.warning(w)
 
             if rows:
-                # ── Portfolio ticker strip ──
                 total_val = sum(r["total"] for r in rows if r["total"])
                 total_prev = sum((r["total"] - r["total_delta"]) for r in rows if r["total"] and r["total_delta"] is not None)
                 port_delta = round(total_val - total_prev, 2) if total_prev else None
                 port_pct = round((port_delta / total_prev) * 100, 1) if port_delta and total_prev else None
-                priced = sum(1 for r in rows if r["primary_price"] is not None)
                 total_qty = sum(r["qty"] for r in rows)
-
                 delta_class = "ticker-delta-up" if port_pct and port_pct > 0 else "ticker-delta-down" if port_pct and port_pct < 0 else "ticker-delta-flat"
                 delta_text = f"+{port_delta:,.2f} (+{port_pct:.1f}%)" if port_delta is not None and port_pct is not None and port_delta >= 0 else f"{port_delta:,.2f} ({port_pct:.1f}%)" if port_delta is not None and port_pct is not None else "—"
+                next_refresh = max(0, int(cache_ttl - elapsed))
+                next_str = f"{next_refresh // 60}m {next_refresh % 60}s" if next_refresh > 0 else "soon"
+                last_str = time.strftime("%H:%M UTC", time.gmtime())
 
-                st.markdown(
-                    f'<div class="ticker-strip">'
-                    f'<div class="ticker-item"><span class="ticker-label">Portfolio value</span><span class="ticker-value">${total_val:,.2f}</span></div>'
-                    f'<div class="ticker-item"><span class="ticker-label">Change</span><span class="{delta_class}">{delta_text}</span></div>'
-                    f'<div class="ticker-item"><span class="ticker-label">Items</span><span class="ticker-value">{len(rows)}</span></div>'
-                    f'<div class="ticker-item"><span class="ticker-label">Quantity</span><span class="ticker-value">{total_qty}</span></div>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
+                # One clean top row: ticker | refresh + meta
+                t1, t2 = st.columns([4, 1])
+                with t1:
+                    st.markdown(
+                        f'<div class="ticker-strip">'
+                        f'<div class="ticker-item"><span class="ticker-label">Portfolio</span><span class="ticker-value">${total_val:,.2f}</span></div>'
+                        f'<div class="ticker-item"><span class="ticker-label">Change</span><span class="{delta_class}">{delta_text}</span></div>'
+                        f'<div class="ticker-item"><span class="ticker-label">Items</span><span class="ticker-value">{len(rows)}</span></div>'
+                        f'<div class="ticker-item"><span class="ticker-label">Qty</span><span class="ticker-value">{total_qty}</span></div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                with t2:
+                    if st.button("🔄 Refresh", use_container_width=True):
+                        st.cache_data.clear()
+                        st.rerun()
+                    st.caption(f"Next {next_str} · Last {last_str}")
 
-                # ── Trading card grid ──
-                n_cols = 3
+                # ── Trading card grid (4 per row on wide screens) ──
+                n_cols = 4
                 for i in range(0, len(rows), n_cols):
                     cols = st.columns(n_cols, gap="medium")
                     for j, col in enumerate(cols):
