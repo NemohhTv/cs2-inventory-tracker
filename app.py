@@ -649,6 +649,12 @@ CSS = """
         min-width: 4rem;
     }
     .ticker-item-change { min-width: 8rem; }
+    .ticker-sep {
+        width: 1px;
+        height: 1.8rem;
+        background: #30363d;
+        flex-shrink: 0;
+    }
     .ticker-change-wrap { display: inline-flex; align-items: center; }
     .ticker-label {
         color: #484f58;
@@ -899,22 +905,58 @@ def main():
                 st.warning(w)
 
             if rows:
-                total_val = sum(r["total"] for r in rows if r["total"])
-                total_prev = sum((r["total"] - r["total_delta"]) for r in rows if r["total"] and r["total_delta"] is not None)
-                port_delta = round(total_val - total_prev, 2) if total_prev else None
-                port_pct = round((port_delta / total_prev) * 100, 1) if port_delta and total_prev else None
                 total_qty = sum(r["qty"] for r in rows)
-                change_badge = _portfolio_change_html(port_delta, port_pct)
+
+                # Steam totals
+                steam_total = 0.0
+                steam_prev_total = 0.0
+                for r in rows:
+                    sp = r.get("steam_price")
+                    q = r.get("qty", 0)
+                    if sp is not None and q > 0:
+                        steam_total += sp * q
+                        sd = r.get("steam_delta")
+                        if sd is not None:
+                            steam_prev_total += (sp - sd) * q
+                        else:
+                            steam_prev_total += sp * q
+                steam_delta = round(steam_total - steam_prev_total, 2) if steam_prev_total > 0 else None
+                steam_pct = round((steam_delta / steam_prev_total) * 100, 1) if steam_delta and steam_prev_total else None
+                steam_badge = _portfolio_change_html(steam_delta, steam_pct)
+
+                # CSFloat totals
+                cf_total = 0.0
+                cf_prev_total = 0.0
+                for r in rows:
+                    cp = r.get("cf_price")
+                    q = r.get("qty", 0)
+                    if cp is not None and q > 0:
+                        cf_total += cp * q
+                        cd = r.get("cf_delta")
+                        if cd is not None:
+                            cf_prev_total += (cp - cd) * q
+                        else:
+                            cf_prev_total += cp * q
+                cf_delta = round(cf_total - cf_prev_total, 2) if cf_prev_total > 0 else None
+                cf_pct = round((cf_delta / cf_prev_total) * 100, 1) if cf_delta and cf_prev_total else None
+                cf_badge = _portfolio_change_html(cf_delta, cf_pct)
+
                 next_refresh = max(0, int(cache_ttl - elapsed))
                 next_str = f"{next_refresh // 60}m {next_refresh % 60}s" if next_refresh > 0 else "now"
                 last_str = time.strftime("%H:%M UTC", time.gmtime())
 
-                # Single unified stats bar (all HTML, no columns)
+                steam_val_str = f"${steam_total:,.2f}" if steam_total else "—"
+                cf_val_str = f"${cf_total:,.2f}" if cf_total else "—"
+
                 st.markdown(
                     f'<div class="stats-bar">'
                     f'<div class="stats-bar-left">'
-                    f'<div class="ticker-item"><span class="ticker-label">Portfolio</span><span class="ticker-value">${total_val:,.2f}</span></div>'
-                    f'<div class="ticker-item ticker-item-change"><span class="ticker-label">Change</span><span class="ticker-change-wrap">{change_badge}</span></div>'
+                    f'<div class="ticker-item"><span class="ticker-label">Steam Value</span><span class="ticker-value">{steam_val_str}</span></div>'
+                    f'<div class="ticker-item ticker-item-change">{steam_badge}</div>'
+                    f'<div class="ticker-sep"></div>'
+                    f'<div class="ticker-item"><span class="ticker-label">Float Value</span><span class="ticker-value">{cf_val_str}</span></div>'
+                    f'<div class="ticker-item ticker-item-change">{cf_badge}</div>'
+                    f'<div class="ticker-sep"></div>'
                     f'<div class="ticker-item"><span class="ticker-label">Items</span><span class="ticker-value">{len(rows)}</span></div>'
                     f'<div class="ticker-item"><span class="ticker-label">Qty</span><span class="ticker-value">{total_qty}</span></div>'
                     f'</div>'
