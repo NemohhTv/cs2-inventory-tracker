@@ -545,8 +545,8 @@ def _portfolio_change_html(port_delta: float | None, port_pct: float | None) -> 
     return '<span class="chg-badge chg-none"><span class="chg-arrow">—</span><span class="chg-pct">No data</span></span>'
 
 
-_STEAM_ICON = '<span style="font-weight:800;font-size:0.7rem;">S</span>'
-_CSFLOAT_ICON = '<span style="font-weight:800;font-style:italic;font-size:0.7rem;">f</span>'
+_STEAM_ICON = '<span class="src-icon-steam">S</span>'
+_CSFLOAT_ICON = '<span class="src-icon-csfloat">f</span>'
 
 
 def _mini_pct_html(pct: float | None) -> str:
@@ -565,7 +565,7 @@ def _trading_card_html(r: dict, source: str = "steam") -> str:
     mkt = market_url(r["name"])
     cf = csfloat_url(r["name"])
     name_esc = (r["name"].replace("&", "&amp;").replace('"', "&quot;")
-                .replace("<", "&lt;").replace(">", "&gt;"))
+                .replace("<", "&lt;").replace(">", "&gt;").replace("`", "&#96;"))
     img = r["image_url"]
     if not img:
         img_block = '<div class="card-img-placeholder">🔫</div>'
@@ -637,28 +637,31 @@ def _trading_card_html(r: dict, source: str = "steam") -> str:
     elif cost is not None:
         pl_html = f'<div class="card-pl pl-even">Bought @ ${cost:,.2f}</div>'
 
-    return f"""
-    <div class="trading-card">
-        <div class="card-img-wrap">{img_block}</div>
-        <a href="{mkt}" target="_blank" class="card-name">{name_esc}</a>
-        <div class="card-price-row">{price_str} {chg}</div>
-        {pl_html}
-        <div class="card-bottom">
-            <div class="card-sources">
-                <a href="{mkt}" target="_blank" class="src-pill src-steam{active_s}" title="Steam Market">
-                    {_STEAM_ICON}<span class="src-price">{steam_val}</span>{steam_chg}
-                </a>
-                <a href="{cf}" target="_blank" class="src-pill src-csfloat{active_c}" title="CSFloat">
-                    {_CSFLOAT_ICON}<span class="src-price">{cf_val}</span>{cf_chg}
-                </a>
-            </div>
-            <div class="card-meta">
-                <span class="meta-item">Qty <strong>{qty_val}</strong></span>
-                <span class="meta-sep"></span>
-                <span class="meta-item">Value <strong>{total_val}</strong></span>
-            </div>
-        </div>
-    </div>"""
+    # IMPORTANT: no leading indentation, or Streamlit will render this as a code block.
+    html = (
+        f'<div class="trading-card">'
+        f'<div class="card-img-wrap">{img_block}</div>'
+        f'<a href="{mkt}" target="_blank" class="card-name">{name_esc}</a>'
+        f'<div class="card-price-row">{price_str} {chg}</div>'
+        f'{pl_html}'
+        f'<div class="card-bottom">'
+        f'<div class="card-sources">'
+        f'<a href="{mkt}" target="_blank" class="src-pill src-steam{active_s}" title="Steam Market">'
+        f'{_STEAM_ICON}<span class="src-price">{steam_val}</span>{steam_chg}'
+        f'</a>'
+        f'<a href="{cf}" target="_blank" class="src-pill src-csfloat{active_c}" title="CSFloat">'
+        f'{_CSFLOAT_ICON}<span class="src-price">{cf_val}</span>{cf_chg}'
+        f'</a>'
+        f'</div>'
+        f'<div class="card-meta">'
+        f'<span class="meta-item">Qty <strong>{qty_val}</strong></span>'
+        f'<span class="meta-sep"></span>'
+        f'<span class="meta-item">Value <strong>{total_val}</strong></span>'
+        f'</div>'
+        f'</div>'
+        f'</div>'
+    )
+    return html
 
 
 CSS = """
@@ -857,6 +860,8 @@ CSS = """
         border: 1px solid rgba(167, 139, 250, 0.15);
     }
     .src-csfloat:hover { background: rgba(167, 139, 250, 0.2); }
+    .src-icon-steam { font-weight: 800; font-size: 0.7rem; }
+    .src-icon-csfloat { font-weight: 800; font-style: italic; font-size: 0.7rem; }
     .src-pill.src-active { border-width: 2px; }
     .src-steam.src-active  { background: rgba(102, 192, 244, 0.18); border-color: #66c0f4; }
     .src-csfloat.src-active { background: rgba(167, 139, 250, 0.18); border-color: #a78bfa; }
@@ -1307,12 +1312,12 @@ def main():
                                         f'<span class="inv-badge">Qty {it["qty"]}</span></div>',
                                         unsafe_allow_html=True,
                                     )
-                            if checked:
-                                selected_visible.add(it["name"])
+                                if checked:
+                                    selected_visible.add(it["name"])
                                 img_url = it.get("image_url", "")
                                 if img_url:
                                     st.markdown(
-                                        f'<div class="inv-thumb-wrap"><img src="{img_url}" class="inv-thumb" /></div>',
+                                        f'<div class="inv-thumb-wrap"><img src="{img_url}" class="inv-thumb" alt="" /></div>',
                                         unsafe_allow_html=True,
                                     )
                                 else:
@@ -1320,12 +1325,14 @@ def main():
                                         '<div class="inv-thumb-wrap"><div class="inv-placeholder">🔫</div></div>',
                                         unsafe_allow_html=True,
                                     )
-                                short = it["name"][:34] + ("…" if len(it["name"]) > 34 else "")
+                                short_raw = it["name"][:34] + ("…" if len(it["name"]) > 34 else "")
+                                short = short_raw.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                                 st.markdown(f'<div class="inv-name{name_cls}">{short}</div>', unsafe_allow_html=True)
                                 wear = _parse_wear(it["name"])
                                 item_type = _parse_weapon_type(it["name"])
+                                meta_esc = (item_type + " · " + wear).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                                 st.markdown(
-                                    f'<div class="inv-meta">{item_type} · {wear}</div>',
+                                    f'<div class="inv-meta">{meta_esc}</div>',
                                     unsafe_allow_html=True,
                                 )
                                 if checked:
