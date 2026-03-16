@@ -1,6 +1,7 @@
 """
 CS2 Inventory Price Tracker - Background Alerter
 Polls CSFloat prices for watchlist items and sends ntfy.sh alerts on significant changes.
+Reads watchlist from shared file (same as UI) or from WATCHLIST env.
 """
 import os
 import time
@@ -9,14 +10,29 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-WATCHLIST_RAW = os.getenv("WATCHLIST", "")
-WATCHLIST = [x.strip() for x in WATCHLIST_RAW.split(",") if x.strip()]
+DATA_DIR = os.getenv("DATA_DIR", "/app/data")
+WATCHLIST_FILE = os.path.join(DATA_DIR, "watchlist.txt")
+
 NTFY_TOPIC = (os.getenv("NTFY_TOPIC") or "").strip()
 ALERT_THRESHOLD = float(os.getenv("ALERT_THRESHOLD", "0.05"))
 CSFLOAT_API_KEY = os.getenv("CSFLOAT_API_KEY", "").strip()
 CSFLOAT_LISTINGS_URL = "https://csfloat.com/api/v1/listings"
 CSFLOAT_DELAY_SEC = 1.5
 POLL_INTERVAL_SEC = 1800  # 30 minutes
+
+
+def get_watchlist() -> list[str]:
+    """Read watchlist from file (one item per line) if it exists, else from env."""
+    if os.path.isfile(WATCHLIST_FILE):
+        try:
+            with open(WATCHLIST_FILE, "r", encoding="utf-8") as f:
+                items = [line.strip() for line in f if line.strip()]
+            if items:
+                return items
+        except OSError:
+            pass
+    raw = os.getenv("WATCHLIST", "")
+    return [x.strip() for x in raw.split(",") if x.strip()]
 
 
 def fetch_csfloat_price(market_hash_name: str) -> float | None:
@@ -64,17 +80,23 @@ def send_ntfy(topic: str, title: str, message: str, emoji: str = "🔔") -> bool
 
 
 def main():
-    if not WATCHLIST:
-        print("WATCHLIST is empty. Set WATCHLIST in .env and restart.")
-        return
+    watchlist = get_watchlist()
+    if not watchlist:
+        print("Watchlist is empty. Add items in the dashboard (Manage watchlist) or set WATCHLIST in env.")
+        time.sleep(60)
+        return main()  # Retry after a minute
     if not NTFY_TOPIC:
         print("NTFY_TOPIC is empty. Alerts will be skipped.")
 
-    # In-memory price history: market_hash_name -> last known price (USD)
     price_cache: dict[str, float] = {}
 
     while True:
-        for i, name in enumerate(WATCHLIST):
+        watchlist = get_watchlist()  # Re-read in case user updated from UI
+        if not watchlist:
+            time.sleep(POLL_INTERVAL_SEC)
+            continue
+
+        for i, name in enumerate(watchlist):
             if i > 0:
                 time.sleep(CSFLOAT_DELAY_SEC)
             price = fetch_csfloat_price(name)
@@ -86,7 +108,7 @@ def main():
             prev = price_cache.get(name)
             price_cache[name] = price
             if prev is None:
-                continue  # First run: no alert
+                continue
             if prev <= 0:
                 continue
             change_pct = (price - prev) / prev

@@ -4,21 +4,28 @@ services:
     command: streamlit run app.py --server.port=8501 --server.address=0.0.0.0
     ports:
       - "8501:8501"
+    volumes:
+      - watchlist_data:/app/data
     environment:
-      - STEAM_ID=${STEAM_ID}
-      - CSFLOAT_API_KEY=${CSFLOAT_API_KEY}
-      - WATCHLIST=${WATCHLIST}
-      - NTFY_TOPIC=${NTFY_TOPIC}
+      - STEAM_ID=${STEAM_ID:-}
+      - CSFLOAT_API_KEY=${CSFLOAT_API_KEY:-}
+      - WATCHLIST=${WATCHLIST:-}
+      - NTFY_TOPIC=${NTFY_TOPIC:-}
       - ALERT_THRESHOLD=${ALERT_THRESHOLD:-0.05}
     restart: unless-stopped
 
   worker:
     build: .
     command: python worker.py
+    volumes:
+      - watchlist_data:/app/data
     environment:
-      - STEAM_ID=${STEAM_ID}
-      - CSFLOAT_API_KEY=${CSFLOAT_API_KEY}
-      - WATCHLIST=${WATCHLIST}
-      - NTFY_TOPIC=${NTFY_TOPIC}
+      - STEAM_ID=${STEAM_ID:-}
+      - CSFLOAT_API_KEY=${CSFLOAT_API_KEY:-}
+      - WATCHLIST=${WATCHLIST:-}
+      - NTFY_TOPIC=${NTFY_TOPIC:-}
       - ALERT_THRESHOLD=${ALERT_THRESHOLD:-0.05}
     restart: unless-stopped
+
+volumes:
+  watchlist_data:
