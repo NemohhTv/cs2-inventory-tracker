@@ -540,8 +540,8 @@ def _mini_pct_html(pct: float | None) -> str:
     return f'<span class="src-chg src-chg-flat">0.0%</span>'
 
 
-def _trading_card_html(r: dict) -> str:
-    """Item card with image, dual pricing (Steam + CSFloat icons), change badge."""
+def _trading_card_html(r: dict, source: str = "steam") -> str:
+    """Item card. `source` is 'steam' or 'float' and controls the hero price."""
     mkt = market_url(r["name"])
     cf = csfloat_url(r["name"])
     name_esc = (r["name"].replace("&", "&amp;").replace('"', "&quot;")
@@ -552,17 +552,25 @@ def _trading_card_html(r: dict) -> str:
     else:
         img_block = f'<a href="{mkt}" target="_blank"><img src="{img}" class="card-img" alt=""/></a>'
 
-    primary = r["primary_price"]
-    steam_pct = r.get("steam_pct")
-    cf_pct = r.get("cf_pct")
-    pct = steam_pct if steam_pct is not None else cf_pct
-    delta = r.get("steam_delta") if r.get("steam_delta") is not None else r.get("cf_delta")
+    sp = r.get("steam_price")
+    cp = r.get("cf_price")
 
-    if primary is not None:
-        price_str = f'<span class="card-price">${primary:,.2f}</span>'
+    if source == "float":
+        hero_price = cp
+        hero_pct = r.get("cf_pct")
+        hero_delta = r.get("cf_delta")
+    else:
+        hero_price = sp
+        hero_pct = r.get("steam_pct")
+        hero_delta = r.get("steam_delta")
+
+    if hero_price is not None:
+        price_str = f'<span class="card-price">${hero_price:,.2f}</span>'
     else:
         price_str = '<span class="card-price-muted">—</span>'
 
+    pct = hero_pct
+    delta = hero_delta
     if pct is not None:
         if pct > 0:
             d_str = f"+${abs(delta):,.2f}" if delta is not None and delta != 0 else ""
@@ -577,20 +585,18 @@ def _trading_card_html(r: dict) -> str:
     else:
         chg = '<span class="chg-badge chg-none"><span class="chg-arrow">—</span><span class="chg-pct">No data</span></span>'
 
-    sp = r.get("steam_price")
-    cp = r.get("cf_price")
     steam_val = f"${sp:,.2f}" if sp is not None else "—"
     cf_val = f"${cp:,.2f}" if cp is not None else "—"
+    steam_chg = _mini_pct_html(r.get("steam_pct"))
+    cf_chg = _mini_pct_html(r.get("cf_pct"))
 
-    s_pct = r.get("steam_pct")
-    c_pct = r.get("cf_pct")
-    steam_chg = _mini_pct_html(s_pct)
-    cf_chg = _mini_pct_html(c_pct)
+    active_s = " src-active" if source == "steam" else ""
+    active_c = " src-active" if source == "float" else ""
 
     qty = r["qty"]
-    total = r["total"]
+    hero_total = round(hero_price * qty, 2) if hero_price is not None and qty > 0 else None
     qty_val = str(qty) if qty > 0 else "0"
-    total_val = f"${total:,.2f}" if total else "—"
+    total_val = f"${hero_total:,.2f}" if hero_total else "—"
 
     return f"""
     <div class="trading-card">
@@ -599,10 +605,10 @@ def _trading_card_html(r: dict) -> str:
         <div class="card-price-row">{price_str} {chg}</div>
         <div class="card-bottom">
             <div class="card-sources">
-                <a href="{mkt}" target="_blank" class="src-pill src-steam" title="Steam Market">
+                <a href="{mkt}" target="_blank" class="src-pill src-steam{active_s}" title="Steam Market">
                     {_STEAM_ICON}<span class="src-price">{steam_val}</span>{steam_chg}
                 </a>
-                <a href="{cf}" target="_blank" class="src-pill src-csfloat" title="CSFloat">
+                <a href="{cf}" target="_blank" class="src-pill src-csfloat{active_c}" title="CSFloat">
                     {_CSFLOAT_ICON}<span class="src-price">{cf_val}</span>{cf_chg}
                 </a>
             </div>
@@ -798,6 +804,9 @@ CSS = """
         border: 1px solid rgba(167, 139, 250, 0.15);
     }
     .src-csfloat:hover { background: rgba(167, 139, 250, 0.2); }
+    .src-pill.src-active { border-width: 2px; }
+    .src-steam.src-active  { background: rgba(102, 192, 244, 0.18); border-color: #66c0f4; }
+    .src-csfloat.src-active { background: rgba(167, 139, 250, 0.18); border-color: #a78bfa; }
 
     .src-chg {
         font-size: 0.68rem;
@@ -986,8 +995,14 @@ def main():
                     st.cache_data.clear()
                     st.rerun()
 
-                # ── Sort & Filter controls ──
-                fc1, fc2, fc3, fc4 = st.columns([2, 2, 2, 1])
+                # ── Source toggle + Sort & Filter controls ──
+                fc0, fc1, fc2, fc3, fc4 = st.columns([1.5, 2, 2, 2, 1])
+                with fc0:
+                    price_src = st.radio(
+                        "Price source", ["Steam", "Float"],
+                        key="dash_src", horizontal=True, label_visibility="collapsed",
+                    )
+                    active_source = "float" if price_src == "Float" else "steam"
                 with fc1:
                     sort_by = st.selectbox(
                         "Sort by",
@@ -1046,7 +1061,7 @@ def main():
                             break
                         r = display_rows[ri]
                         with col:
-                            st.markdown(_trading_card_html(r), unsafe_allow_html=True)
+                            st.markdown(_trading_card_html(r, source=active_source), unsafe_allow_html=True)
                             if st.button("Remove from watchlist", key=f"drm_{r['name']}",
                                          type="secondary", use_container_width=True):
                                 remove_from_watchlist(r["name"])
@@ -1090,17 +1105,19 @@ def main():
             if not inv:
                 st.warning("Could not load inventory. Make sure your **Steam profile** and **CS2 inventory** are set to **Public**.")
             else:
-                st.caption(f"{len(inv)} unique items in your inventory")
-                search = st.text_input("🔍 Search", placeholder="Filter by name…", key="inv_search")
+                # Search + info row
+                s1, s2 = st.columns([3, 1])
+                with s1:
+                    search = st.text_input("🔍 Search", placeholder="Filter by name…",
+                                           key="inv_search", label_visibility="collapsed")
                 filtered = [i for i in inv if search.lower() in i["name"].lower()] if search else inv
-
                 unwatched = [i for i in filtered if i["name"] not in watchlist_set]
-                watched_count = len(filtered) - len(unwatched)
 
-                # Collect checkbox selections
+                # Compact grid with checkboxes -- 5 columns
                 selected: list[str] = []
-                for i in range(0, len(filtered), 3):
-                    cols = st.columns(3, gap="medium")
+                n_inv_cols = 5
+                for i in range(0, len(filtered), n_inv_cols):
+                    cols = st.columns(n_inv_cols, gap="small")
                     for j, col in enumerate(cols):
                         idx = i + j
                         if idx >= len(filtered):
@@ -1108,34 +1125,34 @@ def main():
                         it = filtered[idx]
                         watched = it["name"] in watchlist_set
                         with col:
-                            st.markdown('<div class="card">', unsafe_allow_html=True)
-                            if it["image_url"]:
-                                st.image(it["image_url"], width=160)
-                            else:
-                                st.markdown('<div class="placeholder-img">🔫</div>',
-                                            unsafe_allow_html=True)
-                            st.markdown(f'<div class="item-title">{it["name"]}</div>',
-                                        unsafe_allow_html=True)
-                            st.caption(f"Qty: {it['qty']}")
+                            img_url = it.get("image_url", "")
+                            if img_url:
+                                st.image(img_url, width=80)
+                            short_name = it["name"][:35] + ("…" if len(it["name"]) > 35 else "")
                             if watched:
                                 st.markdown(
-                                    '<span style="color:#3fb950;font-size:0.78rem;">⭐ Tracked</span>',
+                                    f'<div style="font-size:0.7rem;color:#8b949e;line-height:1.2;">{short_name}</div>'
+                                    f'<div style="color:#3fb950;font-size:0.65rem;">⭐ Tracked · Qty {it["qty"]}</div>',
                                     unsafe_allow_html=True,
                                 )
                             else:
-                                if st.checkbox("Select", key=f"isel_{idx}", label_visibility="visible"):
+                                st.markdown(
+                                    f'<div style="font-size:0.7rem;color:#e6edf3;line-height:1.2;">{short_name}</div>'
+                                    f'<div style="color:#6e7681;font-size:0.65rem;">Qty {it["qty"]}</div>',
+                                    unsafe_allow_html=True,
+                                )
+                                if st.checkbox("Select", key=f"isel_{idx}", label_visibility="collapsed"):
                                     selected.append(it["name"])
-                            st.markdown('</div>', unsafe_allow_html=True)
 
-                # Sticky action bar at the top (rendered after checkboxes so we know the count)
-                if selected:
-                    st.toast(f"{len(selected)} items selected")
+                # Action bar
+                st.divider()
                 act1, act2, act3 = st.columns([3, 2, 2])
                 with act1:
-                    st.caption(f"Showing {len(filtered)} items · {watched_count} tracked · {len(selected)} selected")
+                    watched_count = len(filtered) - len(unwatched)
+                    st.caption(f"{len(filtered)} items · {watched_count} tracked · **{len(selected)} selected**")
                 with act2:
                     if selected:
-                        if st.button(f"Add {len(selected)} selected to watchlist", key="add_selected",
+                        if st.button(f"Add {len(selected)} selected", key="add_selected",
                                      type="primary", use_container_width=True):
                             cur = get_watchlist()
                             cur_set = set(cur)
