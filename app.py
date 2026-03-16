@@ -278,27 +278,49 @@ def _fetch_csfloat(name: str) -> tuple[float | None, bool]:
 
 
 # =========================================================================
-# Combined data fetch (cached — TTL managed manually for dynamic scaling)
+# Combined data fetch (persistent file cache so redeploys don't spam APIs)
 # =========================================================================
 LAST_FETCH_FILE = os.path.join(DATA_DIR, "last_fetch_ts.json")
-
-
-def _should_refetch(n_items: int) -> bool:
-    """Check if enough time has passed since the last fetch."""
-    ttl = _auto_cache_ttl(n_items)
-    ts_data = _read_json(LAST_FETCH_FILE)
-    last = ts_data.get("ts", 0)
-    return (time.time() - last) >= ttl
+LAST_FETCH_CACHE_FILE = os.path.join(DATA_DIR, "last_fetch_cache.json")
 
 
 def _mark_fetched():
     _write_json(LAST_FETCH_FILE, {"ts": time.time()})
 
 
+def _load_fetch_cache() -> dict | None:
+    data = _read_json(LAST_FETCH_CACHE_FILE)
+    if not data or not data.get("rows"):
+        return None
+    return data
+
+
+def _save_fetch_cache(ts: float, watchlist: list, steam_id: str, rows: list, warnings: list):
+    # Store only JSON-serializable row fields (no need for image_url; we recompute on display)
+    out = {
+        "ts": ts,
+        "watchlist": watchlist,
+        "steam_id": steam_id,
+        "rows": rows,
+        "warnings": warnings,
+    }
+    _write_json(LAST_FETCH_CACHE_FILE, out)
+
+
 @st.cache_data(ttl=300, show_spinner="Fetching prices…")
 def fetch_watchlist_data(watchlist: tuple[str, ...], steam_id: str, _cache_bust: int = 0) -> tuple[list[dict], list[str]]:
     if not watchlist:
         return [], []
+
+    cache_ttl = _auto_cache_ttl(len(watchlist))
+    watchlist_list = list(watchlist)
+
+    # Use persistent file cache so redeploy doesn't trigger API calls
+    cached = _load_fetch_cache()
+    if cached:
+        if (cached.get("watchlist") == watchlist_list and cached.get("steam_id") == steam_id
+                and (time.time() - cached.get("ts", 0)) < cache_ttl):
+            return cached.get("rows", []), cached.get("warnings", [])
 
     inv = get_inventory_items(steam_id) if steam_id else []
     qty_map = {i["name"]: i["qty"] for i in inv}
@@ -394,7 +416,9 @@ def fetch_watchlist_data(watchlist: tuple[str, ...], steam_id: str, _cache_bust:
     if len(batch) < len(watchlist):
         warnings.append(f"Showing {len(batch)} of {len(watchlist)} items (rate-limit cap).")
 
+    ts = time.time()
     _mark_fetched()
+    _save_fetch_cache(ts, watchlist_list, steam_id, rows, warnings)
     return rows, warnings
 
 
@@ -500,24 +524,24 @@ def _trading_card_html(r: dict) -> str:
 
 CSS = """
 <style>
-    /* Base - full width, compact padding */
+    /* Base - full width, compact padding; avoid header overlapping sidebar */
     .stApp { background: #0d1117; }
     .stApp > div[data-testid="stAppViewContainer"] { padding-top: 0; }
-    .block-container { padding-top: 1rem !important; padding-bottom: 2rem !important; max-width: 100% !important; }
+    .block-container { padding-top: 0.5rem !important; padding-bottom: 2rem !important; max-width: 100% !important; }
     [data-testid="stSidebar"] {
         background: linear-gradient(180deg, #161b22 0%, #0d1117 100%);
         border-right: 1px solid #21262d;
     }
     [data-testid="stSidebar"] .stMarkdown { color: #8b949e; }
-    /* Collapse sidebar icon - smaller and aligned */
     [data-testid="stSidebar"] [data-testid="collapsedControl"] { top: 0.5rem; }
 
-    /* Compact top bar: title + tagline in one line */
+    /* Header: in-flow, no negative margin so sidebar toggle stays visible */
     .trading-header {
         background: #161b22;
         border-bottom: 1px solid #21262d;
-        padding: 0.5rem 0 0.75rem 0;
-        margin: -1rem -1rem 0 -1rem;
+        border-radius: 0 0 8px 8px;
+        padding: 0.6rem 1rem;
+        margin: 0 0 0.75rem 0;
         display: flex;
         align-items: baseline;
         gap: 0.5rem;
