@@ -485,6 +485,11 @@ def _parse_weapon_type(name: str) -> str:
     return name.split("(", 1)[0].strip() or "Other"
 
 
+def _inventory_pick_key(name: str) -> str:
+    safe = re.sub(r"[^a-zA-Z0-9]+", "_", name).strip("_").lower()
+    return f"inv_pick_{safe[:80]}"
+
+
 def _delta_html(delta: float | None, pct: float | None, prefix: str = "") -> str:
     """Return HTML for a price delta like '▲ +$5.38 (+3.5%)' in green/red."""
     if delta is None:
@@ -890,20 +895,97 @@ CSS = """
     div[data-testid="stMetricLabel"] { color: #8b949e; }
 
     /* ── Inventory tab ───────────────────────────────────── */
-    .card {
+    .inv-toolbar {
         background: #161b22;
         border: 1px solid #21262d;
         border-radius: 10px;
-        padding: 1rem;
-        margin-bottom: 0.5rem;
+        padding: 0.75rem 1rem;
+        margin-bottom: 0.75rem;
     }
-    .placeholder-img {
-        width: 160px; height: 100px;
-        background: #21262d; border-radius: 8px;
-        display: flex; align-items: center; justify-content: center;
-        color: #484f58; font-size: 2rem;
+    .inv-summary {
+        color: #8b949e;
+        font-size: 0.78rem;
+        line-height: 1.4;
     }
-    .item-title { font-weight: 600; font-size: 0.9rem; color: #e6edf3; }
+    .inv-card {
+        background: #161b22;
+        border: 1px solid #21262d;
+        border-radius: 12px;
+        padding: 0.55rem;
+        min-height: 205px;
+        transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+    }
+    .inv-card:hover {
+        border-color: #30363d;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.22);
+        transform: translateY(-1px);
+    }
+    .inv-card.inv-selected {
+        border-color: #58a6ff;
+        box-shadow: 0 0 0 1px rgba(88,166,255,0.18) inset;
+        background: linear-gradient(180deg, #161b22 0%, #121a24 100%);
+    }
+    .inv-check-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        min-height: 1.25rem;
+        margin-bottom: 0.25rem;
+    }
+    .inv-badge {
+        color: #8b949e;
+        background: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 999px;
+        font-size: 0.64rem;
+        padding: 0.1rem 0.35rem;
+        font-variant-numeric: tabular-nums;
+    }
+    .inv-thumb-wrap {
+        height: 84px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 0.35rem;
+    }
+    .inv-thumb {
+        width: 100%;
+        max-width: 92px;
+        max-height: 72px;
+        object-fit: contain;
+        filter: drop-shadow(0 2px 6px rgba(0,0,0,0.28));
+    }
+    .inv-placeholder {
+        width: 92px;
+        height: 72px;
+        background: #21262d;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #484f58;
+        font-size: 1.6rem;
+    }
+    .inv-name {
+        color: #e6edf3;
+        font-size: 0.72rem;
+        font-weight: 600;
+        line-height: 1.25;
+        min-height: 2.7rem;
+        overflow: hidden;
+    }
+    .inv-name.inv-selected-name { color: #79c0ff; }
+    .inv-meta {
+        color: #6e7681;
+        font-size: 0.66rem;
+        margin-top: 0.2rem;
+    }
+    .inv-state {
+        color: #3fb950;
+        font-size: 0.66rem;
+        font-weight: 600;
+        margin-top: 0.15rem;
+    }
 
     /* ── Settings tab ────────────────────────────────────── */
     .stTextInput input {
@@ -1158,13 +1240,49 @@ def main():
             if not inv:
                 st.warning("Could not load inventory. Make sure your **Steam profile** and **CS2 inventory** are set to **Public**.")
             else:
-                search = st.text_input("🔍 Search inventory", placeholder="Filter by name…",
-                                       key="inv_search", label_visibility="collapsed")
-                filtered = [i for i in inv if search.lower() in i["name"].lower()] if search else inv
+                inv_names = {item["name"] for item in inv}
+                pending_key = "inventory_pending_watchlist"
+                if pending_key not in st.session_state:
+                    st.session_state[pending_key] = [n for n in watchlist if n in inv_names]
 
-                # Each tile is a toggle: checked = on watchlist
-                toggled_names: list[str] = []
-                n_inv_cols = 6
+                search = st.text_input(
+                    "🔍 Search inventory",
+                    placeholder="Filter by name…",
+                    key="inv_search",
+                    label_visibility="collapsed",
+                )
+                show_selected_only = st.checkbox("Show selected only", key="inv_show_selected")
+
+                pending_set = set(st.session_state.get(pending_key, []))
+                filtered = [i for i in inv if search.lower() in i["name"].lower()] if search else list(inv)
+                if show_selected_only:
+                    filtered = [i for i in filtered if i["name"] in pending_set]
+
+                toolbar_left, toolbar_mid, toolbar_right = st.columns([3, 1, 1])
+                with toolbar_left:
+                    visible_selected = sum(1 for i in filtered if i["name"] in pending_set)
+                    st.markdown(
+                        f'<div class="inv-toolbar"><div class="inv-summary">'
+                        f'{len(filtered)} visible · {visible_selected} selected · {len(pending_set)} total selected'
+                        f'</div></div>',
+                        unsafe_allow_html=True,
+                    )
+                with toolbar_mid:
+                    if filtered and st.button("Select visible", key="inv_select_visible", use_container_width=True):
+                        st.session_state[pending_key] = sorted(pending_set | {i["name"] for i in filtered})
+                        for item in filtered:
+                            st.session_state[_inventory_pick_key(item["name"])] = True
+                        st.rerun()
+                with toolbar_right:
+                    if filtered and st.button("Clear visible", key="inv_clear_visible", use_container_width=True):
+                        st.session_state[pending_key] = sorted(pending_set - {i["name"] for i in filtered})
+                        for item in filtered:
+                            st.session_state[_inventory_pick_key(item["name"])] = False
+                        st.rerun()
+
+                selected_visible: set[str] = set()
+                visible_names = {item["name"] for item in filtered}
+                n_inv_cols = 5
                 for i in range(0, len(filtered), n_inv_cols):
                     cols = st.columns(n_inv_cols, gap="small")
                     for j, col in enumerate(cols):
@@ -1172,63 +1290,79 @@ def main():
                         if idx >= len(filtered):
                             break
                         it = filtered[idx]
-                        on_wl = it["name"] in watchlist_set
+                        widget_key = _inventory_pick_key(it["name"])
+                        if widget_key not in st.session_state:
+                            st.session_state[widget_key] = it["name"] in pending_set
                         with col:
-                            checked = st.checkbox(
-                                it["name"][:30], value=on_wl,
-                                key=f"itile_{idx}", label_visibility="collapsed",
-                            )
-                            img_url = it.get("image_url", "")
-                            if img_url:
-                                st.image(img_url, width=70)
-                            short = it["name"][:28] + ("…" if len(it["name"]) > 28 else "")
-                            badge = f'<span style="color:#6e7681;font-size:0.6rem;">x{it["qty"]}</span>'
+                            checked = bool(st.session_state[widget_key])
+                            name_cls = " inv-selected-name" if checked else ""
+                            tile = st.container(border=True)
+                            with tile:
+                                check_col, badge_col = st.columns([1, 1])
+                                with check_col:
+                                    checked = st.checkbox("Track", key=widget_key, label_visibility="collapsed")
+                                with badge_col:
+                                    st.markdown(
+                                        f'<div class="inv-check-row" style="justify-content:flex-end;">'
+                                        f'<span class="inv-badge">Qty {it["qty"]}</span></div>',
+                                        unsafe_allow_html=True,
+                                    )
                             if checked:
+                                selected_visible.add(it["name"])
+                                img_url = it.get("image_url", "")
+                                if img_url:
+                                    st.markdown(
+                                        f'<div class="inv-thumb-wrap"><img src="{img_url}" class="inv-thumb" /></div>',
+                                        unsafe_allow_html=True,
+                                    )
+                                else:
+                                    st.markdown(
+                                        '<div class="inv-thumb-wrap"><div class="inv-placeholder">🔫</div></div>',
+                                        unsafe_allow_html=True,
+                                    )
+                                short = it["name"][:34] + ("…" if len(it["name"]) > 34 else "")
+                                st.markdown(f'<div class="inv-name{name_cls}">{short}</div>', unsafe_allow_html=True)
+                                wear = _parse_wear(it["name"])
+                                item_type = _parse_weapon_type(it["name"])
                                 st.markdown(
-                                    f'<div style="font-size:0.65rem;color:#58a6ff;line-height:1.2;'
-                                    f'font-weight:600;">{short}</div>{badge}',
+                                    f'<div class="inv-meta">{item_type} · {wear}</div>',
                                     unsafe_allow_html=True,
                                 )
-                                toggled_names.append(it["name"])
-                            else:
-                                st.markdown(
-                                    f'<div style="font-size:0.65rem;color:#8b949e;line-height:1.2;">'
-                                    f'{short}</div>{badge}',
-                                    unsafe_allow_html=True,
-                                )
+                                if checked:
+                                    st.markdown('<div class="inv-state">Selected for watchlist</div>', unsafe_allow_html=True)
 
-                # Compute diff vs current watchlist
-                new_set = set(toggled_names)
-                old_set = watchlist_set & {i["name"] for i in filtered}
-                to_add = new_set - old_set
-                to_remove = old_set - new_set
+                new_pending_set = (pending_set - visible_names) | selected_visible
+                st.session_state[pending_key] = sorted(new_pending_set)
+
+                to_add = new_pending_set - watchlist_set
+                to_remove = (watchlist_set & inv_names) - new_pending_set
                 has_changes = bool(to_add or to_remove)
 
                 st.divider()
-                sc1, sc2 = st.columns([3, 2])
-                with sc1:
-                    total_on = len(toggled_names)
-                    summary = f"{len(filtered)} items · **{total_on} selected**"
+                save_left, save_right = st.columns([3, 2])
+                with save_left:
+                    summary = f"{len(new_pending_set)} selected in inventory"
                     if to_add:
-                        summary += f" · <span style='color:#3fb950;'>+{len(to_add)} new</span>"
+                        summary += f" · <span style='color:#3fb950;'>+{len(to_add)} add</span>"
                     if to_remove:
-                        summary += f" · <span style='color:#f85149;'>−{len(to_remove)} removed</span>"
-                    st.markdown(f"<span style='font-size:0.8rem;color:#8b949e;'>{summary}</span>",
-                                unsafe_allow_html=True)
-                with sc2:
+                        summary += f" · <span style='color:#f85149;'>−{len(to_remove)} remove</span>"
+                    st.markdown(
+                        f"<span style='font-size:0.8rem;color:#8b949e;'>{summary}</span>",
+                        unsafe_allow_html=True,
+                    )
+                with save_right:
                     if has_changes:
-                        if st.button("Save watchlist changes", key="inv_save",
-                                     type="primary", use_container_width=True):
+                        if st.button("Save watchlist changes", key="inv_save", type="primary", use_container_width=True):
                             cur = get_watchlist()
-                            cur_set_full = set(cur)
                             updated = [n for n in cur if n not in to_remove]
-                            for n in to_add:
-                                if n not in cur_set_full:
+                            updated_set = set(updated)
+                            for n in st.session_state[pending_key]:
+                                if n not in updated_set:
                                     updated.append(n)
                             save_watchlist(updated)
                             st.rerun()
                     else:
-                        st.caption("Toggle items above, then save")
+                        st.caption("Select items above, then save")
 
     # ── Manage Watchlist ──────────────────────────────────────
     with tab_manage:
