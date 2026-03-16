@@ -1,13 +1,12 @@
 """
 CS2 Inventory Price Tracker — Streamlit Dashboard
-Item images from Steam CDN, prices from Steam Market (primary) + CSFloat (optional),
-quantities from Steam inventory. Watchlist and settings configurable from the UI.
+Dual pricing (Steam Market + CSFloat), price-change ticker, item images,
+inventory browser, and settings from the UI.
 """
 import json
 import os
 import re
 import time
-import urllib.parse
 
 import pandas as pd
 import requests
@@ -23,6 +22,7 @@ DATA_DIR = os.getenv("DATA_DIR", os.path.join(os.path.dirname(__file__), "data")
 WATCHLIST_FILE = os.path.join(DATA_DIR, "watchlist.txt")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 IMAGE_CACHE_FILE = os.path.join(DATA_DIR, "image_cache.json")
+PRICE_HISTORY_FILE = os.path.join(DATA_DIR, "price_history.json")
 
 # ---------------------------------------------------------------------------
 # API URLs
@@ -33,33 +33,41 @@ STEAM_IMG_CDN = "https://community.akamai.steamstatic.com/economy/image/"
 CSFLOAT_LISTINGS_URL = "https://csfloat.com/api/v1/listings"
 
 # ---------------------------------------------------------------------------
-# Rate-limit tunables (env or defaults)
+# Rate-limit tunables
 # ---------------------------------------------------------------------------
 PRICE_DELAY_SEC = float(os.getenv("PRICE_DELAY_SEC", "3.0"))
 CACHE_TTL_SEC = int(os.getenv("CSFLOAT_CACHE_TTL_SEC", "1200"))
-MAX_ITEMS_PER_RUN = int(os.getenv("CSFLOAT_MAX_ITEMS", "40"))
+MAX_ITEMS = int(os.getenv("CSFLOAT_MAX_ITEMS", "40"))
 
 # =========================================================================
-# Settings (persisted to data/settings.json so user can configure from UI)
+# Settings
 # =========================================================================
 def _ensure_data_dir():
     os.makedirs(DATA_DIR, exist_ok=True)
 
 
-def load_settings() -> dict:
-    if os.path.isfile(SETTINGS_FILE):
+def _read_json(path: str) -> dict:
+    if os.path.isfile(path):
         try:
-            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except (OSError, json.JSONDecodeError):
             pass
     return {}
 
 
-def save_settings(settings: dict):
+def _write_json(path: str, data: dict):
     _ensure_data_dir()
-    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(settings, f, indent=2)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+
+def load_settings() -> dict:
+    return _read_json(SETTINGS_FILE)
+
+
+def save_settings(s: dict):
+    _write_json(SETTINGS_FILE, s)
 
 
 def get_steam_id() -> str:
@@ -77,7 +85,7 @@ def get_watchlist() -> list[str]:
     if os.path.isfile(WATCHLIST_FILE):
         try:
             with open(WATCHLIST_FILE, "r", encoding="utf-8") as f:
-                items = [line.strip() for line in f if line.strip()]
+                items = [l.strip() for l in f if l.strip()]
             if items:
                 return items
         except OSError:
@@ -93,9 +101,9 @@ def save_watchlist(items: list[str]):
 
 
 def add_to_watchlist(item: str):
-    current = get_watchlist()
-    if item.strip() and item.strip() not in current:
-        save_watchlist(current + [item.strip()])
+    cur = get_watchlist()
+    if item.strip() and item.strip() not in cur:
+        save_watchlist(cur + [item.strip()])
 
 
 def remove_from_watchlist(item: str):
@@ -103,22 +111,14 @@ def remove_from_watchlist(item: str):
 
 
 # =========================================================================
-# Image cache (market_hash_name -> icon_url hash from Steam)
+# Image cache
 # =========================================================================
 def load_image_cache() -> dict[str, str]:
-    if os.path.isfile(IMAGE_CACHE_FILE):
-        try:
-            with open(IMAGE_CACHE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (OSError, json.JSONDecodeError):
-            pass
-    return {}
+    return _read_json(IMAGE_CACHE_FILE)
 
 
 def save_image_cache(cache: dict[str, str]):
-    _ensure_data_dir()
-    with open(IMAGE_CACHE_FILE, "w", encoding="utf-8") as f:
-        json.dump(cache, f)
+    _write_json(IMAGE_CACHE_FILE, cache)
 
 
 def get_item_image_url(name: str) -> str:
@@ -127,14 +127,25 @@ def get_item_image_url(name: str) -> str:
 
 
 # =========================================================================
+# Price history (persisted between cache refreshes)
+# =========================================================================
+def load_price_history() -> dict:
+    return _read_json(PRICE_HISTORY_FILE)
+
+
+def save_price_history(h: dict):
+    _write_json(PRICE_HISTORY_FILE, h)
+
+
+# =========================================================================
 # Steam inventory
 # =========================================================================
 def _fetch_steam_inventory_raw(steam_id: str) -> dict:
     if not steam_id:
         return {}
-    url = STEAM_INVENTORY_URL.format(steam_id=steam_id)
     try:
-        r = requests.get(url, params={"l": "english", "count": 2000}, timeout=20)
+        r = requests.get(STEAM_INVENTORY_URL.format(steam_id=steam_id),
+                         params={"l": "english", "count": 2000}, timeout=20)
         if r.status_code == 429:
             return {}
         r.raise_for_status()
@@ -144,36 +155,32 @@ def _fetch_steam_inventory_raw(steam_id: str) -> dict:
 
 
 def _parse_inventory(inventory: dict) -> list[dict]:
-    """Returns sorted list of {name, qty, icon_url}."""
     if not inventory:
         return []
     descriptions = inventory.get("descriptions") or []
     assets = inventory.get("assets") or []
-
-    classid_info: dict[str, dict] = {}
+    cid_info: dict[str, dict] = {}
     for d in descriptions:
         cid = d.get("classid", "")
         name = d.get("market_hash_name") or d.get("market_name") or ""
         icon = d.get("icon_url_large") or d.get("icon_url") or ""
         if cid and name:
-            classid_info[cid] = {"name": name, "icon_url": icon}
-
+            cid_info[cid] = {"name": name, "icon_url": icon}
     counts: dict[str, int] = {}
     for a in assets:
-        info = classid_info.get(a.get("classid", ""))
+        info = cid_info.get(a.get("classid", ""))
         if info:
             counts[info["name"]] = counts.get(info["name"], 0) + 1
-
-    image_cache = load_image_cache()
-    results = []
+    ic = load_image_cache()
+    out = []
     for name, qty in sorted(counts.items(), key=lambda x: x[0].lower()):
-        icon = next((v["icon_url"] for v in classid_info.values() if v["name"] == name and v["icon_url"]), "")
+        icon = next((v["icon_url"] for v in cid_info.values() if v["name"] == name and v["icon_url"]), "")
         if icon:
-            image_cache[name] = icon
+            ic[name] = icon
         img = f"{STEAM_IMG_CDN}{icon}/360fx360f" if icon else ""
-        results.append({"name": name, "qty": qty, "icon_url": icon, "image_url": img})
-    save_image_cache(image_cache)
-    return results
+        out.append({"name": name, "qty": qty, "icon_url": icon, "image_url": img})
+    save_image_cache(ic)
+    return out
 
 
 @st.cache_data(ttl=300, show_spinner="Loading inventory…")
@@ -184,7 +191,7 @@ def get_inventory_items(steam_id: str) -> list[dict]:
 
 
 # =========================================================================
-# Prices
+# Price fetchers
 # =========================================================================
 def _parse_price_string(s: str) -> float | None:
     if not s:
@@ -203,31 +210,30 @@ def _parse_price_string(s: str) -> float | None:
         return None
 
 
-def fetch_steam_market_price(name: str) -> dict | None:
-    params = {"appid": "730", "currency": "1", "market_hash_name": name}
+def _fetch_steam_market(name: str) -> float | None:
     try:
-        r = requests.get(STEAM_MARKET_PRICE_URL, params=params, timeout=10)
+        r = requests.get(STEAM_MARKET_PRICE_URL,
+                         params={"appid": "730", "currency": "1", "market_hash_name": name},
+                         timeout=10)
         if r.status_code == 429:
             return None
         r.raise_for_status()
-        data = r.json()
+        d = r.json()
     except (requests.RequestException, ValueError):
         return None
-    if not data.get("success"):
+    if not d.get("success"):
         return None
-    return {
-        "lowest": _parse_price_string(data.get("lowest_price", "")),
-        "median": _parse_price_string(data.get("median_price", "")),
-        "volume": data.get("volume", "0").replace(",", ""),
-    }
+    return _parse_price_string(d.get("lowest_price", "")) or _parse_price_string(d.get("median_price", ""))
 
 
-def fetch_csfloat_price(name: str) -> tuple[float | None, bool]:
-    api_key = get_csfloat_key()
-    params = {"market_hash_name": name, "limit": 1}
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+def _fetch_csfloat(name: str) -> tuple[float | None, bool]:
+    """Returns (price, was_429)."""
+    key = get_csfloat_key()
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
     try:
-        r = requests.get(CSFLOAT_LISTINGS_URL, params=params, headers=headers or None, timeout=10)
+        r = requests.get(CSFLOAT_LISTINGS_URL,
+                         params={"market_hash_name": name, "limit": 1},
+                         headers=headers or None, timeout=10)
         if r.status_code == 429:
             return None, True
         r.raise_for_status()
@@ -238,14 +244,17 @@ def fetch_csfloat_price(name: str) -> tuple[float | None, bool]:
     if not listings:
         return None, False
     first = listings[0] if isinstance(listings[0], dict) else {}
-    price = first.get("price") or first.get("listing_price") or first.get("suggested_price")
-    if price is None:
+    p = first.get("price") or first.get("listing_price") or first.get("suggested_price")
+    if p is None:
         return None, False
-    if isinstance(price, (int, float)):
-        return (float(price) / 100.0 if price > 1000 else float(price)), False
+    if isinstance(p, (int, float)):
+        return (float(p) / 100.0 if p > 1000 else float(p)), False
     return None, False
 
 
+# =========================================================================
+# Combined data fetch (cached)
+# =========================================================================
 @st.cache_data(ttl=CACHE_TTL_SEC, show_spinner="Fetching prices…")
 def fetch_watchlist_data(watchlist: tuple[str, ...], steam_id: str) -> tuple[list[dict], list[str]]:
     if not watchlist:
@@ -253,46 +262,94 @@ def fetch_watchlist_data(watchlist: tuple[str, ...], steam_id: str) -> tuple[lis
 
     inv = get_inventory_items(steam_id) if steam_id else []
     qty_map = {i["name"]: i["qty"] for i in inv}
+    history = load_price_history()
 
-    batch = list(watchlist[: max(1, MAX_ITEMS_PER_RUN)])
+    batch = list(watchlist[: max(1, MAX_ITEMS)])
     rows: list[dict] = []
     warnings: list[str] = []
+    csfloat_hit_429 = False
 
+    # Pass 1: Steam Market prices
+    steam_prices: dict[str, float | None] = {}
     for idx, name in enumerate(batch):
         if idx > 0:
             time.sleep(max(1.0, PRICE_DELAY_SEC))
+        steam_prices[name] = _fetch_steam_market(name)
 
-        price = None
-        source = ""
-
-        # Primary: Steam Market
-        mkt = fetch_steam_market_price(name)
-        if mkt:
-            price = mkt.get("lowest") or mkt.get("median")
-            if price is not None:
-                source = "Steam Market"
-
-        # Fallback: CSFloat (only if we have a key)
-        if price is None and get_csfloat_key():
+    # Pass 2: CSFloat prices (always attempt, not just as fallback)
+    cf_prices: dict[str, float | None] = {}
+    for idx, name in enumerate(batch):
+        if csfloat_hit_429:
+            cf_prices[name] = None
+            continue
+        if idx > 0:
             time.sleep(max(1.0, PRICE_DELAY_SEC))
-            cf, was_429 = fetch_csfloat_price(name)
-            if was_429:
-                warnings.append("CSFloat rate-limited; partial data shown.")
-                break
-            if cf is not None:
-                price, source = cf, "CSFloat"
+        p, was_429 = _fetch_csfloat(name)
+        if was_429:
+            csfloat_hit_429 = True
+            warnings.append("CSFloat rate-limited — CSFloat prices may be partial.")
+            cf_prices[name] = None
+        else:
+            cf_prices[name] = p
 
+    # Build rows with deltas
+    new_history: dict = {}
+    for name in batch:
+        sp = steam_prices.get(name)
+        cp = cf_prices.get(name)
+        prev = history.get(name, {})
+        prev_steam = prev.get("steam")
+        prev_cf = prev.get("csfloat")
+
+        sp_r = round(sp, 2) if sp is not None else None
+        cp_r = round(cp, 2) if cp is not None else None
+
+        # Compute deltas
+        steam_delta = round(sp_r - prev_steam, 2) if sp_r is not None and prev_steam is not None else None
+        steam_pct = round((steam_delta / prev_steam) * 100, 2) if steam_delta is not None and prev_steam else None
+        cf_delta = round(cp_r - prev_cf, 2) if cp_r is not None and prev_cf is not None else None
+        cf_pct = round((cf_delta / prev_cf) * 100, 2) if cf_delta is not None and prev_cf else None
+
+        # Primary price for totals: prefer Steam Market, fall back to CSFloat
+        primary = sp_r if sp_r is not None else cp_r
+        prev_primary = prev_steam if prev_steam is not None else prev_cf
         qty = qty_map.get(name, 0)
-        total = round(price * qty, 2) if price is not None and qty > 0 else None
+        total = round(primary * qty, 2) if primary is not None and qty > 0 else None
+        prev_total = round(prev_primary * qty, 2) if prev_primary is not None and qty > 0 else None
+        total_delta = round(total - prev_total, 2) if total is not None and prev_total is not None else None
+
+        # Save to new history
+        entry: dict = {}
+        if sp_r is not None:
+            entry["steam"] = sp_r
+        elif prev_steam is not None:
+            entry["steam"] = prev_steam  # keep old if we couldn't fetch
+        if cp_r is not None:
+            entry["csfloat"] = cp_r
+        elif prev_cf is not None:
+            entry["csfloat"] = prev_cf
+        new_history[name] = entry
 
         rows.append({
             "name": name,
-            "price": round(price, 2) if price is not None else None,
-            "qty": qty,
-            "total": total,
-            "source": source,
             "image_url": get_item_image_url(name),
+            "qty": qty,
+            "steam_price": sp_r,
+            "steam_delta": steam_delta,
+            "steam_pct": steam_pct,
+            "cf_price": cp_r,
+            "cf_delta": cf_delta,
+            "cf_pct": cf_pct,
+            "primary_price": primary,
+            "total": total,
+            "total_delta": total_delta,
         })
+
+    # Persist history for next comparison
+    for k, v in history.items():
+        if k not in new_history:
+            new_history[k] = v
+    save_price_history(new_history)
 
     if len(batch) < len(watchlist):
         warnings.append(f"Showing {len(batch)} of {len(watchlist)} items (rate-limit cap).")
@@ -301,8 +358,40 @@ def fetch_watchlist_data(watchlist: tuple[str, ...], steam_id: str) -> tuple[lis
 
 
 # =========================================================================
-# UI
+# UI helpers
 # =========================================================================
+def _delta_html(delta: float | None, pct: float | None, prefix: str = "") -> str:
+    """Return HTML for a price delta like '▲ +$5.38 (+3.5%)' in green/red."""
+    if delta is None:
+        return '<span style="color:#484f58;font-size:0.8rem;">—</span>'
+    if delta > 0:
+        arrow, color = "▲", "#22c55e"
+        sign = "+"
+    elif delta < 0:
+        arrow, color = "▼", "#ef4444"
+        sign = ""
+    else:
+        arrow, color = "—", "#8b949e"
+        sign = ""
+    pct_str = f" ({sign}{pct:.1f}%)" if pct is not None else ""
+    return f'<span style="color:{color};font-size:0.85rem;font-weight:600;">{arrow} {sign}${abs(delta):,.2f}{pct_str}</span>'
+
+
+def _price_block_html(label: str, price: float | None, delta: float | None, pct: float | None) -> str:
+    """Price box HTML for one source."""
+    if price is not None:
+        price_str = f'<span style="color:#58a6ff;font-size:1.25rem;font-weight:700;">${price:,.2f}</span>'
+    else:
+        price_str = '<span style="color:#484f58;font-size:1.1rem;">—</span>'
+    delta_str = _delta_html(delta, pct)
+    return (
+        f'<div style="background:#21262d;border-radius:8px;padding:0.6rem 0.75rem;flex:1;min-width:140px;">'
+        f'<div style="color:#8b949e;font-size:0.7rem;text-transform:uppercase;margin-bottom:2px;">{label}</div>'
+        f'{price_str}<br>{delta_str}'
+        f'</div>'
+    )
+
+
 CSS = """
 <style>
     .stApp { background-color: #0e1117; }
@@ -310,51 +399,54 @@ CSS = """
     div[data-testid="stMetricValue"] { color: #58a6ff; }
     .card {
         background: linear-gradient(135deg, #161b22 0%, #1c2128 100%);
-        border: 1px solid #30363d;
-        border-radius: 12px;
-        padding: 1rem;
-        margin-bottom: 0.5rem;
+        border: 1px solid #30363d; border-radius: 12px;
+        padding: 1rem; margin-bottom: 0.5rem;
         transition: border-color 0.2s;
     }
     .card:hover { border-color: #58a6ff; }
-    .price-tag { color: #58a6ff; font-size: 1.35rem; font-weight: 700; }
-    .price-source { color: #484f58; font-size: 0.72rem; margin-left: 4px; }
     .item-title { font-weight: 600; font-size: 0.95rem; color: #e6edf3;
                   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .meta { color: #8b949e; font-size: 0.82rem; }
     .placeholder-img { width: 120px; height: 90px; background: #21262d;
                        border-radius: 8px; display: flex; align-items: center;
                        justify-content: center; color: #484f58; font-size: 2.5rem; }
+    .price-row { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+    .ticker-up { color: #22c55e; font-weight: 700; }
+    .ticker-down { color: #ef4444; font-weight: 700; }
+    .ticker-flat { color: #8b949e; }
 </style>
 """
 
 
+# =========================================================================
+# Sidebar
+# =========================================================================
 def render_sidebar():
     with st.sidebar:
         st.header("Settings")
-        settings = load_settings()
-        cur_sid = settings.get("steam_id") or os.getenv("STEAM_ID", "")
-        cur_cf = settings.get("csfloat_api_key") or os.getenv("CSFLOAT_API_KEY", "")
-
+        s = load_settings()
+        cur_sid = s.get("steam_id") or os.getenv("STEAM_ID", "")
+        cur_cf = s.get("csfloat_api_key") or os.getenv("CSFLOAT_API_KEY", "")
         new_sid = st.text_input("Steam ID (64-bit)", value=cur_sid,
                                 placeholder="76561198012345678",
                                 help="Get yours at steamid.io")
         new_cf = st.text_input("CSFloat API key (optional)", value=cur_cf,
                                type="password",
-                               help="Adds CSFloat as a secondary price source")
-
+                               help="Enables CSFloat pricing column")
         if st.button("Save settings", use_container_width=True):
             save_settings({"steam_id": new_sid.strip(), "csfloat_api_key": new_cf.strip()})
             st.cache_data.clear()
-            st.success("Saved! Reloading…")
+            st.success("Saved!")
             st.rerun()
-
         st.divider()
         st.caption(f"Steam ID: {'Set' if get_steam_id() else 'Not set'}")
-        st.caption(f"CSFloat key: {'Set' if get_csfloat_key() else 'Not set – using Steam Market'}")
-        st.caption(f"Price cache: {CACHE_TTL_SEC // 60} min")
+        st.caption(f"CSFloat key: {'Set' if get_csfloat_key() else 'Not set'}")
+        st.caption(f"Cache: {CACHE_TTL_SEC // 60} min  ·  Delay: {PRICE_DELAY_SEC}s")
 
 
+# =========================================================================
+# Main
+# =========================================================================
 def main():
     st.set_page_config(page_title="CS2 Inventory Tracker", page_icon="🎯",
                        layout="wide", initial_sidebar_state="auto")
@@ -383,17 +475,28 @@ def main():
                 st.warning(w)
 
             if rows:
-                # Portfolio summary
+                # ── Portfolio summary ──
                 total_val = sum(r["total"] for r in rows if r["total"])
-                priced = sum(1 for r in rows if r["price"] is not None)
+                total_prev = sum((r["total"] - r["total_delta"]) for r in rows if r["total"] and r["total_delta"] is not None)
+                port_delta = round(total_val - total_prev, 2) if total_prev else None
+                port_pct = round((port_delta / total_prev) * 100, 1) if port_delta and total_prev else None
+                priced = sum(1 for r in rows if r["primary_price"] is not None)
                 total_qty = sum(r["qty"] for r in rows)
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Portfolio value", f"${total_val:,.2f}" if total_val else "—")
-                c2.metric("Items tracked", f"{len(rows)} ({priced} priced)")
-                c3.metric("Total quantity", str(total_qty))
+
+                pc1, pc2, pc3, pc4 = st.columns(4)
+                pc1.metric("Portfolio value", f"${total_val:,.2f}" if total_val else "—")
+                if port_delta is not None:
+                    sign = "+" if port_delta >= 0 else ""
+                    pc2.metric("Change", f"{sign}${port_delta:,.2f}",
+                               delta=f"{sign}{port_pct:.1f}%" if port_pct is not None else None,
+                               delta_color="normal")
+                else:
+                    pc2.metric("Change", "—", help="Appears after second price fetch")
+                pc3.metric("Items tracked", f"{len(rows)} ({priced} priced)")
+                pc4.metric("Total quantity", str(total_qty))
                 st.divider()
 
-                # Item cards – 2 per row
+                # ── Item cards ──
                 for i in range(0, len(rows), 2):
                     cols = st.columns(2, gap="medium")
                     for j, col in enumerate(cols):
@@ -403,6 +506,7 @@ def main():
                         r = rows[ri]
                         with col:
                             st.markdown('<div class="card">', unsafe_allow_html=True)
+                            # Top row: image + name
                             ic, dc = st.columns([1, 3])
                             with ic:
                                 if r["image_url"]:
@@ -413,23 +517,27 @@ def main():
                             with dc:
                                 st.markdown(f'<div class="item-title">{r["name"]}</div>',
                                             unsafe_allow_html=True)
-                                if r["price"] is not None:
-                                    st.markdown(
-                                        f'<span class="price-tag">${r["price"]:,.2f}</span>'
-                                        f'<span class="price-source">via {r["source"]}</span>',
-                                        unsafe_allow_html=True)
-                                else:
-                                    st.markdown('<span class="meta">Price unavailable</span>',
-                                                unsafe_allow_html=True)
-                                parts = []
-                                if r["qty"] > 0:
-                                    parts.append(f"Qty: **{r['qty']}**")
-                                else:
-                                    parts.append("Not in inventory")
-                                if r["total"]:
-                                    parts.append(f"Total: **${r['total']:,.2f}**")
-                                st.caption("  ·  ".join(parts))
-                            bc1, bc2 = st.columns([4, 1])
+                                # Dual price boxes
+                                steam_box = _price_block_html(
+                                    "Steam Market", r["steam_price"], r["steam_delta"], r["steam_pct"])
+                                cf_box = _price_block_html(
+                                    "CSFloat", r["cf_price"], r["cf_delta"], r["cf_pct"])
+                                st.markdown(
+                                    f'<div class="price-row">{steam_box}{cf_box}</div>',
+                                    unsafe_allow_html=True)
+
+                            # Bottom: qty, total, total delta, remove
+                            qty_str = f"Qty: **{r['qty']}**" if r["qty"] > 0 else "Not in inventory"
+                            total_str = f"Value: **${r['total']:,.2f}**" if r["total"] else ""
+                            td_html = ""
+                            if r["total_delta"] is not None:
+                                td_html = _delta_html(r["total_delta"], None)
+                            parts_md = f"{qty_str}{'  ·  ' + total_str if total_str else ''}"
+                            bc1, bc2 = st.columns([5, 1])
+                            with bc1:
+                                st.caption(parts_md)
+                                if td_html:
+                                    st.markdown(td_html, unsafe_allow_html=True)
                             with bc2:
                                 if st.button("Remove", key=f"drm_{ri}", type="secondary"):
                                     remove_from_watchlist(r["name"])
@@ -437,17 +545,24 @@ def main():
                                     st.rerun()
                             st.markdown('</div>', unsafe_allow_html=True)
 
-                # Table view
+                # ── Detail table ──
                 st.divider()
                 st.subheader("Detail table")
-                df = pd.DataFrame([{
-                    "Item": r["name"],
-                    "Price (USD)": f"${r['price']:,.2f}" if r["price"] else "—",
-                    "Qty": r["qty"],
-                    "Total (USD)": f"${r['total']:,.2f}" if r["total"] else "—",
-                    "Source": r["source"] or "—",
-                } for r in rows])
-                st.dataframe(df, use_container_width=True, hide_index=True)
+                table_rows = []
+                for r in rows:
+                    sd = r["steam_delta"]
+                    cd = r["cf_delta"]
+                    table_rows.append({
+                        "Item": r["name"],
+                        "Steam (USD)": f"${r['steam_price']:,.2f}" if r["steam_price"] else "—",
+                        "Steam Δ": f"{'+'if sd and sd>0 else ''}{sd:+,.2f}" if sd is not None else "—",
+                        "CSFloat (USD)": f"${r['cf_price']:,.2f}" if r["cf_price"] else "—",
+                        "CSFloat Δ": f"{'+'if cd and cd>0 else ''}{cd:+,.2f}" if cd is not None else "—",
+                        "Qty": r["qty"],
+                        "Total (USD)": f"${r['total']:,.2f}" if r["total"] else "—",
+                    })
+                st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
+
             else:
                 st.info("No price data yet. Prices appear after the first fetch cycle.")
 
@@ -458,14 +573,11 @@ def main():
         else:
             inv = get_inventory_items(steam_id)
             if not inv:
-                st.warning("Could not load your inventory. Make sure your **Steam profile** and **CS2 inventory** are set to **Public**.")
+                st.warning("Could not load inventory. Make sure your **Steam profile** and **CS2 inventory** are set to **Public**.")
             else:
                 st.caption(f"{len(inv)} unique items in your inventory")
                 search = st.text_input("🔍 Search", placeholder="Filter by name…", key="inv_search")
-                filtered = inv
-                if search:
-                    q = search.lower()
-                    filtered = [i for i in inv if q in i["name"].lower()]
+                filtered = [i for i in inv if search.lower() in i["name"].lower()] if search else inv
                 st.caption(f"Showing {len(filtered)} items")
 
                 for i in range(0, len(filtered), 3):
@@ -517,7 +629,6 @@ def main():
                         st.rerun()
         else:
             st.info("Watchlist is empty. Add items from **My Inventory** or type a name below.")
-
         st.divider()
         st.subheader("Add custom item")
         st.caption("Enter the exact market hash name (copy from Steam Market URL or CSFloat).")
