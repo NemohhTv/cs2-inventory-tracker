@@ -512,6 +512,17 @@ _CSFLOAT_ICON = (
 )
 
 
+def _mini_pct_html(pct: float | None) -> str:
+    """Small green/red percentage text for inside source pills."""
+    if pct is None:
+        return ""
+    if pct > 0:
+        return f'<span class="src-chg src-chg-up">+{pct:.1f}%</span>'
+    elif pct < 0:
+        return f'<span class="src-chg src-chg-down">{pct:.1f}%</span>'
+    return f'<span class="src-chg src-chg-flat">0.0%</span>'
+
+
 def _trading_card_html(r: dict) -> str:
     """Item card with image, dual pricing (Steam + CSFloat icons), change badge."""
     mkt = market_url(r["name"])
@@ -554,6 +565,11 @@ def _trading_card_html(r: dict) -> str:
     steam_val = f"${sp:,.2f}" if sp is not None else "—"
     cf_val = f"${cp:,.2f}" if cp is not None else "—"
 
+    s_pct = r.get("steam_pct")
+    c_pct = r.get("cf_pct")
+    steam_chg = _mini_pct_html(s_pct)
+    cf_chg = _mini_pct_html(c_pct)
+
     qty = r["qty"]
     total = r["total"]
     qty_val = str(qty) if qty > 0 else "0"
@@ -567,10 +583,10 @@ def _trading_card_html(r: dict) -> str:
         <div class="card-bottom">
             <div class="card-sources">
                 <a href="{mkt}" target="_blank" class="src-pill src-steam" title="Steam Market">
-                    {_STEAM_ICON}<span class="src-price">{steam_val}</span>
+                    {_STEAM_ICON}<span class="src-price">{steam_val}</span>{steam_chg}
                 </a>
                 <a href="{cf}" target="_blank" class="src-pill src-csfloat" title="CSFloat">
-                    {_CSFLOAT_ICON}<span class="src-price">{cf_val}</span>
+                    {_CSFLOAT_ICON}<span class="src-price">{cf_val}</span>{cf_chg}
                 </a>
             </div>
             <div class="card-meta">
@@ -759,6 +775,16 @@ CSS = """
         border: 1px solid rgba(167, 139, 250, 0.15);
     }
     .src-csfloat:hover { background: rgba(167, 139, 250, 0.2); }
+
+    .src-chg {
+        font-size: 0.68rem;
+        font-weight: 600;
+        margin-left: auto;
+        font-variant-numeric: tabular-nums;
+    }
+    .src-chg-up   { color: #3fb950; }
+    .src-chg-down { color: #f85149; }
+    .src-chg-flat { color: #6e7681; }
 
     .card-meta {
         display: flex;
