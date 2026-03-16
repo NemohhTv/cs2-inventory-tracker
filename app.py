@@ -291,6 +291,16 @@ def _mark_fetched():
     _write_json(LAST_FETCH_FILE, {"ts": time.time()})
 
 
+def _invalidate_fetch_cache():
+    """Delete the persistent file cache so the next load does a fresh API fetch."""
+    for p in (LAST_FETCH_CACHE_FILE, LAST_FETCH_FILE):
+        try:
+            if os.path.isfile(p):
+                os.remove(p)
+        except OSError:
+            pass
+
+
 def _load_fetch_cache() -> dict | None:
     data = _read_json(LAST_FETCH_CACHE_FILE)
     if not data or not data.get("rows"):
@@ -539,36 +549,36 @@ def _trading_card_html(r: dict) -> str:
     else:
         chg = '<span class="chg-badge chg-none"><span class="chg-arrow">—</span><span class="chg-pct">No data</span></span>'
 
-    # Dual price source row with icons
     sp = r.get("steam_price")
     cp = r.get("cf_price")
     steam_val = f"${sp:,.2f}" if sp is not None else "—"
     cf_val = f"${cp:,.2f}" if cp is not None else "—"
-    sources = (
-        f'<div class="card-sources">'
-        f'<a href="{mkt}" target="_blank" class="src-link src-steam" title="Steam Market">'
-        f'{_STEAM_ICON}<span>{steam_val}</span></a>'
-        f'<a href="{cf}" target="_blank" class="src-link src-csfloat" title="CSFloat">'
-        f'{_CSFLOAT_ICON}<span>{cf_val}</span></a>'
-        f'</div>'
-    )
 
     qty = r["qty"]
     total = r["total"]
-    qty_str = f"Qty: {qty}" if qty > 0 else "Not owned"
-    val_str = f"Value ${total:,.2f}" if total else ""
-    footer_parts = [qty_str]
-    if val_str:
-        footer_parts.append(val_str)
-    footer = " · ".join(footer_parts)
+    qty_val = str(qty) if qty > 0 else "0"
+    total_val = f"${total:,.2f}" if total else "—"
 
     return f"""
     <div class="trading-card">
         <div class="card-img-wrap">{img_block}</div>
         <a href="{mkt}" target="_blank" class="card-name">{name_esc}</a>
         <div class="card-price-row">{price_str} {chg}</div>
-        {sources}
-        <div class="card-footer">{footer}</div>
+        <div class="card-bottom">
+            <div class="card-sources">
+                <a href="{mkt}" target="_blank" class="src-pill src-steam" title="Steam Market">
+                    {_STEAM_ICON}<span class="src-price">{steam_val}</span>
+                </a>
+                <a href="{cf}" target="_blank" class="src-pill src-csfloat" title="CSFloat">
+                    {_CSFLOAT_ICON}<span class="src-price">{cf_val}</span>
+                </a>
+            </div>
+            <div class="card-meta">
+                <span class="meta-item">Qty <strong>{qty_val}</strong></span>
+                <span class="meta-sep"></span>
+                <span class="meta-item">Value <strong>{total_val}</strong></span>
+            </div>
+        </div>
     </div>"""
 
 
@@ -710,44 +720,63 @@ CSS = """
     .chg-badge.chg-none { color: #6e7681; background: rgba(110, 118, 129, 0.1); font-weight: 500; }
     .chg-badge.chg-none .chg-pct { font-size: 0.75rem; }
 
-    /* Dual-source price row (Steam + CSFloat icons) */
+    /* Card bottom section */
+    .card-bottom {
+        border-top: 1px solid #21262d;
+        margin-top: 0.4rem;
+        padding-top: 0.5rem;
+    }
     .card-sources {
         display: flex;
         align-items: center;
-        gap: 0.75rem;
-        margin-bottom: 0.35rem;
+        gap: 0.4rem;
+        margin-bottom: 0.4rem;
     }
-    .src-link {
+    .src-pill {
         display: inline-flex;
         align-items: center;
-        gap: 0.3rem;
+        gap: 0.35rem;
         text-decoration: none;
-        font-size: 0.78rem;
-        font-weight: 600;
         font-variant-numeric: tabular-nums;
-        padding: 0.2rem 0.5rem;
-        border-radius: 6px;
-        transition: background 0.15s;
+        padding: 0.3rem 0.6rem;
+        border-radius: 8px;
+        transition: background 0.15s, transform 0.15s;
+        flex: 1;
+        justify-content: center;
     }
-    .src-link:hover { text-decoration: none; }
-    .src-link svg { flex-shrink: 0; }
+    .src-pill:hover { text-decoration: none; transform: translateY(-1px); }
+    .src-pill svg { flex-shrink: 0; opacity: 0.85; }
+    .src-price { font-size: 0.8rem; font-weight: 700; }
     .src-steam {
         color: #66c0f4;
-        background: rgba(102, 192, 244, 0.08);
+        background: rgba(102, 192, 244, 0.1);
+        border: 1px solid rgba(102, 192, 244, 0.15);
     }
-    .src-steam:hover { background: rgba(102, 192, 244, 0.18); }
+    .src-steam:hover { background: rgba(102, 192, 244, 0.2); }
     .src-csfloat {
         color: #a78bfa;
-        background: rgba(167, 139, 250, 0.08);
+        background: rgba(167, 139, 250, 0.1);
+        border: 1px solid rgba(167, 139, 250, 0.15);
     }
-    .src-csfloat:hover { background: rgba(167, 139, 250, 0.18); }
+    .src-csfloat:hover { background: rgba(167, 139, 250, 0.2); }
 
-    .card-footer {
+    .card-meta {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
         color: #6e7681;
-        font-size: 0.75rem;
-        padding-top: 0.25rem;
-        border-top: 1px solid #21262d;
-        margin-top: 0.25rem;
+        font-size: 0.72rem;
+    }
+    .card-meta strong {
+        color: #8b949e;
+        font-weight: 600;
+    }
+    .meta-sep {
+        width: 3px; height: 3px;
+        background: #30363d;
+        border-radius: 50%;
+        flex-shrink: 0;
     }
 
     /* ── Metrics ─────────────────────────────────────────── */
@@ -799,6 +828,7 @@ def render_settings_tab():
                                help="Enables CSFloat pricing alongside Steam Market")
     if st.button("Save settings"):
         save_settings({"steam_id": new_sid.strip(), "csfloat_api_key": new_cf.strip()})
+        _invalidate_fetch_cache()
         st.cache_data.clear()
         st.success("Saved!")
         st.rerun()
@@ -867,6 +897,7 @@ def main():
                     unsafe_allow_html=True,
                 )
                 if st.button("🔄 Refresh prices", use_container_width=False):
+                    _invalidate_fetch_cache()
                     st.cache_data.clear()
                     st.rerun()
 
