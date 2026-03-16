@@ -540,10 +540,12 @@ def _trading_card_html(r: dict) -> str:
 
 CSS = """
 <style>
-    /* Base - full width, compact padding; avoid header overlapping sidebar */
+    /* Hide Streamlit's built-in toolbar so it doesn't overlap the header */
+    [data-testid="stToolbar"] { display: none !important; }
+    [data-testid="stHeader"] { height: 0 !important; min-height: 0 !important; padding: 0 !important; }
+    /* Base */
     .stApp { background: #0d1117; }
-    .stApp > div[data-testid="stAppViewContainer"] { padding-top: 0; }
-    .block-container { padding-top: 0.5rem !important; padding-bottom: 2rem !important; max-width: 100% !important; }
+    .block-container { padding-top: 0.75rem !important; padding-bottom: 2rem !important; max-width: 100% !important; }
     [data-testid="stSidebar"] {
         background: linear-gradient(180deg, #161b22 0%, #0d1117 100%);
         border-right: 1px solid #21262d;
