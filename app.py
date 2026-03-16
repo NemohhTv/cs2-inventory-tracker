@@ -464,6 +464,22 @@ def _price_block_html(label: str, price: float | None, delta: float | None, pct:
     )
 
 
+def _portfolio_change_html(port_delta: float | None, port_pct: float | None) -> str:
+    """Portfolio-level change badge: same style as item cards (up/down/same/none)."""
+    if port_pct is not None:
+        if port_pct > 0:
+            d_str = f"+${port_delta:,.2f}" if port_delta else ""
+            delta_span = f' <span class="chg-delta">{d_str}</span>' if d_str else ""
+            return f'<span class="chg-badge chg-up"><span class="chg-arrow">↑</span><span class="chg-pct">+{port_pct:.1f}%</span>{delta_span}</span>'
+        elif port_pct < 0:
+            d_str = f"−${abs(port_delta):,.2f}" if port_delta else ""
+            delta_span = f' <span class="chg-delta">{d_str}</span>' if d_str else ""
+            return f'<span class="chg-badge chg-down"><span class="chg-arrow">↓</span><span class="chg-pct">{port_pct:.1f}%</span>{delta_span}</span>'
+        else:
+            return '<span class="chg-badge chg-same"><span class="chg-arrow">●</span><span class="chg-pct">0.0%</span></span>'
+    return '<span class="chg-badge chg-none"><span class="chg-arrow">—</span><span class="chg-pct">No data</span></span>'
+
+
 def _trading_card_html(r: dict) -> str:
     """Single trading-style item card: image, name link, primary price + % change, Steam|CSFloat, qty/value."""
     mkt = market_url(r["name"])
@@ -569,12 +585,11 @@ CSS = """
         border-bottom: 1px solid #21262d;
         margin-bottom: 0.75rem;
     }
-    .ticker-item { display: flex; flex-direction: column; gap: 0; }
+    .ticker-item { display: flex; flex-direction: column; gap: 0; min-width: 4rem; }
+    .ticker-item-change { min-width: 7rem; }
+    .ticker-change-wrap { display: inline-flex; align-items: center; }
     .ticker-label { color: #6e7681; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.04em; }
     .ticker-value { color: #e6edf3; font-size: 1.1rem; font-weight: 700; font-variant-numeric: tabular-nums; }
-    .ticker-delta-up { color: #3fb950; font-size: 0.8rem; font-weight: 600; }
-    .ticker-delta-down { color: #f85149; font-size: 0.8rem; font-weight: 600; }
-    .ticker-delta-flat { color: #8b949e; font-size: 0.8rem; }
     .top-bar-meta { color: #6e7681; font-size: 0.75rem; display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
 
     /* Trading cards - smaller, 4 fit per row on wide screens */
@@ -719,8 +734,7 @@ def main():
                 port_delta = round(total_val - total_prev, 2) if total_prev else None
                 port_pct = round((port_delta / total_prev) * 100, 1) if port_delta and total_prev else None
                 total_qty = sum(r["qty"] for r in rows)
-                delta_class = "ticker-delta-up" if port_pct and port_pct > 0 else "ticker-delta-down" if port_pct and port_pct < 0 else "ticker-delta-flat"
-                delta_text = f"+{port_delta:,.2f} (+{port_pct:.1f}%)" if port_delta is not None and port_pct is not None and port_delta >= 0 else f"{port_delta:,.2f} ({port_pct:.1f}%)" if port_delta is not None and port_pct is not None else "—"
+                change_badge = _portfolio_change_html(port_delta, port_pct)
                 next_refresh = max(0, int(cache_ttl - elapsed))
                 next_str = f"{next_refresh // 60}m {next_refresh % 60}s" if next_refresh > 0 else "soon"
                 last_str = time.strftime("%H:%M UTC", time.gmtime())
@@ -731,7 +745,7 @@ def main():
                     st.markdown(
                         f'<div class="ticker-strip">'
                         f'<div class="ticker-item"><span class="ticker-label">Portfolio</span><span class="ticker-value">${total_val:,.2f}</span></div>'
-                        f'<div class="ticker-item"><span class="ticker-label">Change</span><span class="{delta_class}">{delta_text}</span></div>'
+                        f'<div class="ticker-item ticker-item-change"><span class="ticker-label">Change</span><span class="ticker-change-wrap">{change_badge}</span></div>'
                         f'<div class="ticker-item"><span class="ticker-label">Items</span><span class="ticker-value">{len(rows)}</span></div>'
                         f'<div class="ticker-item"><span class="ticker-label">Qty</span><span class="ticker-value">{total_qty}</span></div>'
                         f'</div>',
