@@ -7,6 +7,7 @@ import json
 import os
 import re
 import time
+import urllib.parse
 
 import pandas as pd
 import requests
@@ -138,6 +139,16 @@ def save_image_cache(cache: dict[str, str]):
 def get_item_image_url(name: str) -> str:
     icon = load_image_cache().get(name, "")
     return f"{STEAM_IMG_CDN}{icon}/360fx360f" if icon else ""
+
+
+def market_url(name: str) -> str:
+    """Steam Community Market listing URL for an item."""
+    return f"https://steamcommunity.com/market/listings/730/{urllib.parse.quote(name)}"
+
+
+def csfloat_url(name: str) -> str:
+    """CSFloat search URL for an item."""
+    return f"https://csfloat.com/search?market_hash_name={urllib.parse.quote(name)}"
 
 
 # =========================================================================
@@ -407,16 +418,23 @@ def _delta_html(delta: float | None, pct: float | None, prefix: str = "") -> str
     return f'<span style="color:{color};font-size:0.85rem;font-weight:600;">{arrow} {sign}${abs(delta):,.2f}{pct_str}</span>'
 
 
-def _price_block_html(label: str, price: float | None, delta: float | None, pct: float | None) -> str:
-    """Price box HTML for one source."""
+def _price_block_html(label: str, price: float | None, delta: float | None, pct: float | None,
+                      link: str = "") -> str:
+    """Price box HTML for one source. Label links to marketplace if link is provided."""
     if price is not None:
         price_str = f'<span style="color:#58a6ff;font-size:1.25rem;font-weight:700;">${price:,.2f}</span>'
     else:
         price_str = '<span style="color:#484f58;font-size:1.1rem;">—</span>'
     delta_str = _delta_html(delta, pct)
+    if link:
+        label_html = (f'<a href="{link}" target="_blank" '
+                      f'style="color:#8b949e;font-size:0.7rem;text-transform:uppercase;'
+                      f'text-decoration:none;margin-bottom:2px;display:block;">{label} ↗</a>')
+    else:
+        label_html = f'<div style="color:#8b949e;font-size:0.7rem;text-transform:uppercase;margin-bottom:2px;">{label}</div>'
     return (
         f'<div style="background:#21262d;border-radius:8px;padding:0.6rem 0.75rem;flex:1;min-width:140px;">'
-        f'<div style="color:#8b949e;font-size:0.7rem;text-transform:uppercase;margin-bottom:2px;">{label}</div>'
+        f'{label_html}'
         f'{price_str}<br>{delta_str}'
         f'</div>'
     )
@@ -569,13 +587,20 @@ def main():
                                     st.markdown('<div class="placeholder-img">🔫</div>',
                                                 unsafe_allow_html=True)
                             with dc:
-                                st.markdown(f'<div class="item-title">{r["name"]}</div>',
-                                            unsafe_allow_html=True)
-                                # Dual price boxes
+                                mkt_link = market_url(r["name"])
+                                cf_link = csfloat_url(r["name"])
+                                st.markdown(
+                                    f'<a href="{mkt_link}" target="_blank" '
+                                    f'style="text-decoration:none;">'
+                                    f'<div class="item-title">{r["name"]} ↗</div></a>',
+                                    unsafe_allow_html=True)
+                                # Dual price boxes (labels link to respective marketplaces)
                                 steam_box = _price_block_html(
-                                    "Steam Market", r["steam_price"], r["steam_delta"], r["steam_pct"])
+                                    "Steam Market", r["steam_price"], r["steam_delta"], r["steam_pct"],
+                                    link=mkt_link)
                                 cf_box = _price_block_html(
-                                    "CSFloat", r["cf_price"], r["cf_delta"], r["cf_pct"])
+                                    "CSFloat", r["cf_price"], r["cf_delta"], r["cf_pct"],
+                                    link=cf_link)
                                 st.markdown(
                                     f'<div class="price-row">{steam_box}{cf_box}</div>',
                                     unsafe_allow_html=True)
@@ -608,6 +633,7 @@ def main():
                     cd = r["cf_delta"]
                     table_rows.append({
                         "Item": r["name"],
+                        "Market link": market_url(r["name"]),
                         "Steam (USD)": f"${r['steam_price']:,.2f}" if r["steam_price"] else "—",
                         "Steam Δ": f"{'+'if sd and sd>0 else ''}{sd:+,.2f}" if sd is not None else "—",
                         "CSFloat (USD)": f"${r['cf_price']:,.2f}" if r["cf_price"] else "—",
@@ -615,7 +641,14 @@ def main():
                         "Qty": r["qty"],
                         "Total (USD)": f"${r['total']:,.2f}" if r["total"] else "—",
                     })
-                st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
+                st.dataframe(
+                    pd.DataFrame(table_rows),
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Market link": st.column_config.LinkColumn("Market link", display_text="Open ↗"),
+                    },
+                )
 
             else:
                 st.info("No price data yet. Prices appear after the first fetch cycle.")
@@ -675,7 +708,7 @@ def main():
                     else:
                         st.markdown("🔫")
                 with c2:
-                    st.markdown(f"**{item}**")
+                    st.markdown(f"**[{item}]({market_url(item)})**")
                 with c3:
                     if st.button("Remove", key=f"mrm_{wi}", type="secondary"):
                         remove_from_watchlist(item)
