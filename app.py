@@ -1168,17 +1168,13 @@ def main():
             if not inv:
                 st.warning("Could not load inventory. Make sure your **Steam profile** and **CS2 inventory** are set to **Public**.")
             else:
-                # Search + info row
-                s1, s2 = st.columns([3, 1])
-                with s1:
-                    search = st.text_input("🔍 Search", placeholder="Filter by name…",
-                                           key="inv_search", label_visibility="collapsed")
+                search = st.text_input("🔍 Search inventory", placeholder="Filter by name…",
+                                       key="inv_search", label_visibility="collapsed")
                 filtered = [i for i in inv if search.lower() in i["name"].lower()] if search else inv
-                unwatched = [i for i in filtered if i["name"] not in watchlist_set]
 
-                # Compact grid with checkboxes -- 5 columns
-                selected: list[str] = []
-                n_inv_cols = 5
+                # Each tile is a toggle: checked = on watchlist
+                toggled_names: list[str] = []
+                n_inv_cols = 6
                 for i in range(0, len(filtered), n_inv_cols):
                     cols = st.columns(n_inv_cols, gap="small")
                     for j, col in enumerate(cols):
@@ -1186,52 +1182,63 @@ def main():
                         if idx >= len(filtered):
                             break
                         it = filtered[idx]
-                        watched = it["name"] in watchlist_set
+                        on_wl = it["name"] in watchlist_set
                         with col:
+                            checked = st.checkbox(
+                                it["name"][:30], value=on_wl,
+                                key=f"itile_{idx}", label_visibility="collapsed",
+                            )
                             img_url = it.get("image_url", "")
                             if img_url:
-                                st.image(img_url, width=80)
-                            short_name = it["name"][:35] + ("…" if len(it["name"]) > 35 else "")
-                            if watched:
+                                st.image(img_url, width=70)
+                            short = it["name"][:28] + ("…" if len(it["name"]) > 28 else "")
+                            badge = f'<span style="color:#6e7681;font-size:0.6rem;">x{it["qty"]}</span>'
+                            if checked:
                                 st.markdown(
-                                    f'<div style="font-size:0.7rem;color:#8b949e;line-height:1.2;">{short_name}</div>'
-                                    f'<div style="color:#3fb950;font-size:0.65rem;">⭐ Tracked · Qty {it["qty"]}</div>',
+                                    f'<div style="font-size:0.65rem;color:#58a6ff;line-height:1.2;'
+                                    f'font-weight:600;">{short}</div>{badge}',
                                     unsafe_allow_html=True,
                                 )
+                                toggled_names.append(it["name"])
                             else:
                                 st.markdown(
-                                    f'<div style="font-size:0.7rem;color:#e6edf3;line-height:1.2;">{short_name}</div>'
-                                    f'<div style="color:#6e7681;font-size:0.65rem;">Qty {it["qty"]}</div>',
+                                    f'<div style="font-size:0.65rem;color:#8b949e;line-height:1.2;">'
+                                    f'{short}</div>{badge}',
                                     unsafe_allow_html=True,
                                 )
-                                if st.checkbox("Select", key=f"isel_{idx}", label_visibility="collapsed"):
-                                    selected.append(it["name"])
 
-                # Action bar
+                # Compute diff vs current watchlist
+                new_set = set(toggled_names)
+                old_set = watchlist_set & {i["name"] for i in filtered}
+                to_add = new_set - old_set
+                to_remove = old_set - new_set
+                has_changes = bool(to_add or to_remove)
+
                 st.divider()
-                act1, act2, act3 = st.columns([3, 2, 2])
-                with act1:
-                    watched_count = len(filtered) - len(unwatched)
-                    st.caption(f"{len(filtered)} items · {watched_count} tracked · **{len(selected)} selected**")
-                with act2:
-                    if selected:
-                        if st.button(f"Add {len(selected)} selected", key="add_selected",
+                sc1, sc2 = st.columns([3, 2])
+                with sc1:
+                    total_on = len(toggled_names)
+                    summary = f"{len(filtered)} items · **{total_on} selected**"
+                    if to_add:
+                        summary += f" · <span style='color:#3fb950;'>+{len(to_add)} new</span>"
+                    if to_remove:
+                        summary += f" · <span style='color:#f85149;'>−{len(to_remove)} removed</span>"
+                    st.markdown(f"<span style='font-size:0.8rem;color:#8b949e;'>{summary}</span>",
+                                unsafe_allow_html=True)
+                with sc2:
+                    if has_changes:
+                        if st.button("Save watchlist changes", key="inv_save",
                                      type="primary", use_container_width=True):
                             cur = get_watchlist()
-                            cur_set = set(cur)
-                            new_items = [n for n in selected if n not in cur_set]
-                            if new_items:
-                                save_watchlist(cur + new_items)
+                            cur_set_full = set(cur)
+                            updated = [n for n in cur if n not in to_remove]
+                            for n in to_add:
+                                if n not in cur_set_full:
+                                    updated.append(n)
+                            save_watchlist(updated)
                             st.rerun()
-                with act3:
-                    if unwatched:
-                        if st.button(f"Add all {len(unwatched)}", key="bulk_add", use_container_width=True):
-                            cur = get_watchlist()
-                            cur_set = set(cur)
-                            new_items = [i["name"] for i in unwatched if i["name"] not in cur_set]
-                            if new_items:
-                                save_watchlist(cur + new_items)
-                            st.rerun()
+                    else:
+                        st.caption("Toggle items above, then save")
 
     # ── Manage Watchlist ──────────────────────────────────────
     with tab_manage:
