@@ -551,19 +551,19 @@ CSS = """
     [data-testid="stSidebar"] .stMarkdown { color: #8b949e; }
     [data-testid="stSidebar"] [data-testid="collapsedControl"] { top: 0.5rem; }
 
-    /* Header: in-flow, no negative margin so sidebar toggle stays visible */
+    /* Header */
     .trading-header {
         background: #161b22;
         border-bottom: 1px solid #21262d;
         border-radius: 0 0 8px 8px;
-        padding: 0.6rem 1rem;
+        padding: 0.6rem 1rem 0.6rem 0;
         margin: 0 0 0.75rem 0;
         display: flex;
         align-items: baseline;
         gap: 0.5rem;
     }
-    .trading-header h1 { margin: 0; font-size: 1.1rem; font-weight: 700; color: #e6edf3; }
-    .trading-header .sub { color: #6e7681; font-size: 0.75rem; font-weight: 400; }
+    .trading-header h1 { margin: 0; font-size: 1.1rem; font-weight: 700; color: #e6edf3; white-space: nowrap; }
+    .trading-header .sub { color: #6e7681; font-size: 0.75rem; font-weight: 400; white-space: nowrap; }
 
     /* Unified stats bar: portfolio stats + refresh meta in one row */
     .stats-bar {
