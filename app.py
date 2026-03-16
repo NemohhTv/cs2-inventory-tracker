@@ -488,8 +488,22 @@ def _portfolio_change_html(port_delta: float | None, port_pct: float | None) -> 
     return '<span class="chg-badge chg-none"><span class="chg-arrow">—</span><span class="chg-pct">No data</span></span>'
 
 
+_STEAM_ICON = (
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">'
+    '<path d="M12 2a10 10 0 0 0-9.96 9.04l5.35 2.21a2.83 2.83 0 0 1 1.6-.49c.05 0 '
+    '.1 0 .16.002l2.39-3.46v-.05a3.79 3.79 0 1 1 3.79 3.79h-.09l-3.4 2.43c0 .06.01'
+    '.12.01.18a2.84 2.84 0 0 1-5.65.36L2.4 14.47A10 10 0 1 0 12 2z"/></svg>'
+)
+_CSFLOAT_ICON = (
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" '
+    'stroke-width="2.2" stroke-linecap="round">'
+    '<path d="M13 4c-1.5 0-3.5.8-3.5 3.5S11 10 11 12s-1.5 4.5-1.5 4.5"/>'
+    '<line x1="8" y1="10" x2="13" y2="10"/></svg>'
+)
+
+
 def _trading_card_html(r: dict) -> str:
-    """Single trading-style item card: image, name link, primary price + % change, Steam|CSFloat, qty/value."""
+    """Item card with image, dual pricing (Steam + CSFloat icons), change badge."""
     mkt = market_url(r["name"])
     cf = csfloat_url(r["name"])
     name_esc = (r["name"].replace("&", "&amp;").replace('"', "&quot;")
@@ -511,7 +525,6 @@ def _trading_card_html(r: dict) -> str:
     else:
         price_str = '<span class="card-price-muted">—</span>'
 
-    # Change badge: up (green) / down (red) / same (yellow) / no data (gray)
     if pct is not None:
         if pct > 0:
             d_str = f"+${abs(delta):,.2f}" if delta is not None and delta != 0 else ""
@@ -525,6 +538,20 @@ def _trading_card_html(r: dict) -> str:
             chg = '<span class="chg-badge chg-same"><span class="chg-arrow">●</span><span class="chg-pct">0.0%</span></span>'
     else:
         chg = '<span class="chg-badge chg-none"><span class="chg-arrow">—</span><span class="chg-pct">No data</span></span>'
+
+    # Dual price source row with icons
+    sp = r.get("steam_price")
+    cp = r.get("cf_price")
+    steam_val = f"${sp:,.2f}" if sp is not None else "—"
+    cf_val = f"${cp:,.2f}" if cp is not None else "—"
+    sources = (
+        f'<div class="card-sources">'
+        f'<a href="{mkt}" target="_blank" class="src-link src-steam" title="Steam Market">'
+        f'{_STEAM_ICON}<span>{steam_val}</span></a>'
+        f'<a href="{cf}" target="_blank" class="src-link src-csfloat" title="CSFloat">'
+        f'{_CSFLOAT_ICON}<span>{cf_val}</span></a>'
+        f'</div>'
+    )
 
     qty = r["qty"]
     total = r["total"]
@@ -540,6 +567,7 @@ def _trading_card_html(r: dict) -> str:
         <div class="card-img-wrap">{img_block}</div>
         <a href="{mkt}" target="_blank" class="card-name">{name_esc}</a>
         <div class="card-price-row">{price_str} {chg}</div>
+        {sources}
         <div class="card-footer">{footer}</div>
     </div>"""
 
@@ -681,6 +709,38 @@ CSS = """
     .chg-badge.chg-same .chg-arrow { font-size: 0.65rem; }
     .chg-badge.chg-none { color: #6e7681; background: rgba(110, 118, 129, 0.1); font-weight: 500; }
     .chg-badge.chg-none .chg-pct { font-size: 0.75rem; }
+
+    /* Dual-source price row (Steam + CSFloat icons) */
+    .card-sources {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin-bottom: 0.35rem;
+    }
+    .src-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        text-decoration: none;
+        font-size: 0.78rem;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        padding: 0.2rem 0.5rem;
+        border-radius: 6px;
+        transition: background 0.15s;
+    }
+    .src-link:hover { text-decoration: none; }
+    .src-link svg { flex-shrink: 0; }
+    .src-steam {
+        color: #66c0f4;
+        background: rgba(102, 192, 244, 0.08);
+    }
+    .src-steam:hover { background: rgba(102, 192, 244, 0.18); }
+    .src-csfloat {
+        color: #a78bfa;
+        background: rgba(167, 139, 250, 0.08);
+    }
+    .src-csfloat:hover { background: rgba(167, 139, 250, 0.18); }
 
     .card-footer {
         color: #6e7681;
