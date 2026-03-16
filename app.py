@@ -440,28 +440,156 @@ def _price_block_html(label: str, price: float | None, delta: float | None, pct:
     )
 
 
+def _trading_card_html(r: dict) -> str:
+    """Single trading-style item card: image, name link, primary price + % change, Steam|CSFloat, qty/value."""
+    mkt = market_url(r["name"])
+    cf = csfloat_url(r["name"])
+    name_esc = (r["name"].replace("&", "&amp;").replace('"', "&quot;")
+                .replace("<", "&lt;").replace(">", "&gt;"))
+    img = r["image_url"]
+    if not img:
+        img_block = '<div class="card-img-placeholder">🔫</div>'
+    else:
+        img_block = f'<a href="{mkt}" target="_blank"><img src="{img}" class="card-img" alt=""/></a>'
+
+    primary = r["primary_price"]
+    steam_pct = r.get("steam_pct")
+    cf_pct = r.get("cf_pct")
+    pct = steam_pct if steam_pct is not None else cf_pct
+    delta = r.get("steam_delta") if r.get("steam_delta") is not None else r.get("cf_delta")
+
+    if primary is not None:
+        price_str = f'<span class="card-price">${primary:,.2f}</span>'
+    else:
+        price_str = '<span class="card-price-muted">—</span>'
+
+    if pct is not None:
+        if pct > 0:
+            chg = f'<span class="chg-up">▲ {pct:+.1f}%</span>'
+        elif pct < 0:
+            chg = f'<span class="chg-down">▼ {pct:.1f}%</span>'
+        else:
+            chg = '<span class="chg-flat">— 0.0%</span>'
+    else:
+        chg = '<span class="chg-flat">—</span>'
+
+    steam_str = f'${r["steam_price"]:,.2f}' if r.get("steam_price") is not None else "—"
+    cf_str = f'${r["cf_price"]:,.2f}' if r.get("cf_price") is not None else "—"
+    sources = f'<a href="{mkt}" target="_blank" class="card-link">Steam</a> {steam_str} · <a href="{cf}" target="_blank" class="card-link">CSFloat</a> {cf_str}'
+
+    qty = r["qty"]
+    total = r["total"]
+    qty_str = f"Qty: {qty}" if qty > 0 else "Not in inventory"
+    val_str = f"${total:,.2f}" if total else "—"
+    footer = f"{qty_str} · Value {val_str}"
+
+    return f"""
+    <div class="trading-card">
+        <div class="card-img-wrap">{img_block}</div>
+        <a href="{mkt}" target="_blank" class="card-name">{name_esc} ↗</a>
+        <div class="card-price-row">{price_str} {chg}</div>
+        <div class="card-sources">{sources}</div>
+        <div class="card-footer">{footer}</div>
+    </div>"""
+
+
 CSS = """
 <style>
-    .stApp { background-color: #0e1117; }
-    [data-testid="stSidebar"] { background-color: #161b22; }
-    div[data-testid="stMetricValue"] { color: #58a6ff; }
-    .card {
-        background: linear-gradient(135deg, #161b22 0%, #1c2128 100%);
-        border: 1px solid #30363d; border-radius: 12px;
-        padding: 1rem; margin-bottom: 0.5rem;
-        transition: border-color 0.2s;
+    /* Base */
+    .stApp { background: #0d1117; }
+    .stApp > div { padding-top: 0.5rem; }
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #161b22 0%, #0d1117 100%);
+        border-right: 1px solid #21262d;
     }
-    .card:hover { border-color: #58a6ff; }
-    .item-title { font-weight: 600; font-size: 0.95rem; color: #e6edf3;
-                  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .meta { color: #8b949e; font-size: 0.82rem; }
-    .placeholder-img { width: 120px; height: 90px; background: #21262d;
-                       border-radius: 8px; display: flex; align-items: center;
-                       justify-content: center; color: #484f58; font-size: 2.5rem; }
-    .price-row { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
-    .ticker-up { color: #22c55e; font-weight: 700; }
-    .ticker-down { color: #ef4444; font-weight: 700; }
-    .ticker-flat { color: #8b949e; }
+    [data-testid="stSidebar"] .stMarkdown { color: #8b949e; }
+
+    /* Header strip */
+    .trading-header {
+        background: #161b22;
+        border-bottom: 1px solid #21262d;
+        padding: 0.75rem 1.25rem;
+        margin: -1rem -1rem 1rem -1rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+    .trading-header h1 { margin: 0; font-size: 1.25rem; font-weight: 700; color: #e6edf3; }
+    .trading-header .sub { color: #8b949e; font-size: 0.8rem; margin-top: 2px; }
+
+    /* Portfolio ticker strip */
+    .ticker-strip {
+        display: flex;
+        gap: 1.5rem;
+        padding: 1rem 1.25rem;
+        background: #161b22;
+        border: 1px solid #21262d;
+        border-radius: 10px;
+        margin-bottom: 1.25rem;
+        flex-wrap: wrap;
+    }
+    .ticker-item { display: flex; flex-direction: column; gap: 2px; }
+    .ticker-label { color: #8b949e; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    .ticker-value { color: #e6edf3; font-size: 1.35rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .ticker-delta-up { color: #3fb950; font-size: 0.9rem; font-weight: 600; }
+    .ticker-delta-down { color: #f85149; font-size: 0.9rem; font-weight: 600; }
+    .ticker-delta-flat { color: #8b949e; font-size: 0.9rem; }
+
+    /* Trading cards grid */
+    .cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+    .trading-card {
+        background: #161b22;
+        border: 1px solid #21262d;
+        border-radius: 10px;
+        padding: 1rem;
+        transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .trading-card:hover { border-color: #30363d; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+    .card-img-wrap { text-align: center; margin-bottom: 0.75rem; }
+    .card-img { width: 100%; max-width: 200px; height: auto; border-radius: 8px; }
+    .card-img-placeholder {
+        width: 100%; max-width: 200px; height: 120px; margin: 0 auto;
+        background: #21262d; border-radius: 8px;
+        display: flex; align-items: center; justify-content: center;
+        color: #484f58; font-size: 2.5rem;
+    }
+    .card-name {
+        display: block;
+        color: #58a6ff;
+        font-weight: 600;
+        font-size: 0.9rem;
+        text-decoration: none;
+        margin-bottom: 0.5rem;
+        line-height: 1.3;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .card-name:hover { text-decoration: underline; color: #79c0ff; }
+    .card-price-row { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.35rem; flex-wrap: wrap; }
+    .card-price { color: #e6edf3; font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .card-price-muted { color: #484f58; font-size: 1.2rem; }
+    .chg-up { color: #3fb950; font-size: 0.9rem; font-weight: 600; }
+    .chg-down { color: #f85149; font-size: 0.9rem; font-weight: 600; }
+    .chg-flat { color: #8b949e; font-size: 0.85rem; }
+    .card-sources { color: #8b949e; font-size: 0.75rem; margin-bottom: 0.5rem; }
+    .card-sources a { color: #58a6ff; text-decoration: none; }
+    .card-sources a:hover { text-decoration: underline; }
+    .card-footer { color: #6e7681; font-size: 0.8rem; }
+
+    /* Tabs */
+    [data-testid="stTabs"] > div:first-child { background: transparent; border-bottom: 1px solid #21262d; }
+    [data-testid="stTabs"] [role="tab"] { color: #8b949e; }
+    [data-testid="stTabs"] [aria-selected="true"] { color: #e6edf3; font-weight: 600; }
+
+    /* Metrics */
+    div[data-testid="stMetricValue"] { color: #e6edf3; font-variant-numeric: tabular-nums; }
+    div[data-testid="stMetricLabel"] { color: #8b949e; }
+
+    /* Inventory tab cards (reuse trading look) */
+    .card { background: #161b22; border: 1px solid #21262d; border-radius: 10px; padding: 1rem; margin-bottom: 0.5rem; }
+    .placeholder-img { width: 160px; height: 100px; background: #21262d; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #484f58; font-size: 2rem; }
+    .item-title { font-weight: 600; font-size: 0.9rem; color: #e6edf3; }
 </style>
 """
 
@@ -502,14 +630,19 @@ def main():
     st.markdown(CSS, unsafe_allow_html=True)
     render_sidebar()
 
-    st.title("🎯 CS2 Inventory Tracker")
-    st.caption("Track prices, quantities, and portfolio value for your CS2 skins")
-
     steam_id = get_steam_id()
     watchlist = get_watchlist()
     watchlist_set = set(watchlist)
 
-    tab_dash, tab_inv, tab_manage = st.tabs(["📊 Dashboard", "📦 My Inventory", "⭐ Manage Watchlist"])
+    # Header bar (trading-app style)
+    st.markdown(
+        '<div class="trading-header">'
+        '<div><h1>CS2 Inventory Tracker</h1><div class="sub">Track prices · Steam Market & CSFloat · Portfolio value</div></div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    tab_dash, tab_inv, tab_manage = st.tabs(["Market", "Inventory", "Watchlist"])
 
     # ── Dashboard ─────────────────────────────────────────────
     with tab_dash:
@@ -525,29 +658,27 @@ def main():
             elapsed = time.time() - last_ts if last_ts else 999999
             cache_bust = int(last_ts) if elapsed < cache_ttl else int(time.time())
 
-            # Refresh controls
-            rc1, rc2, rc3 = st.columns([1, 1, 4])
+            # Refresh bar
+            rc1, rc2, rc3 = st.columns([1, 2, 3])
             with rc1:
-                if st.button("🔄 Refresh now", use_container_width=True):
+                if st.button("🔄 Refresh", use_container_width=True):
                     st.cache_data.clear()
                     st.rerun()
             with rc2:
                 next_refresh = max(0, int(cache_ttl - elapsed))
                 if next_refresh > 0:
-                    st.caption(f"Next auto-refresh in {next_refresh // 60}m {next_refresh % 60}s")
+                    st.caption(f"Next refresh in {next_refresh // 60}m {next_refresh % 60}s")
                 else:
                     st.caption("Refreshing…")
             with rc3:
-                st.caption(f"Auto-refresh: {cache_ttl // 60} min ({len(watchlist)} items)")
+                st.caption(f"Last fetched: {time.strftime('%H:%M UTC', time.gmtime())} · Auto-refresh every {cache_ttl // 60} min")
 
             rows, warnings = fetch_watchlist_data(tuple(watchlist), steam_id, _cache_bust=cache_bust)
-            ts = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
-            st.caption(f"Last fetched: {ts}")
             for w in warnings:
                 st.warning(w)
 
             if rows:
-                # ── Portfolio summary ──
+                # ── Portfolio ticker strip ──
                 total_val = sum(r["total"] for r in rows if r["total"])
                 total_prev = sum((r["total"] - r["total_delta"]) for r in rows if r["total"] and r["total_delta"] is not None)
                 port_delta = round(total_val - total_prev, 2) if total_prev else None
@@ -555,100 +686,59 @@ def main():
                 priced = sum(1 for r in rows if r["primary_price"] is not None)
                 total_qty = sum(r["qty"] for r in rows)
 
-                pc1, pc2, pc3, pc4 = st.columns(4)
-                pc1.metric("Portfolio value", f"${total_val:,.2f}" if total_val else "—")
-                if port_delta is not None:
-                    sign = "+" if port_delta >= 0 else ""
-                    pc2.metric("Change", f"{sign}${port_delta:,.2f}",
-                               delta=f"{sign}{port_pct:.1f}%" if port_pct is not None else None,
-                               delta_color="normal")
-                else:
-                    pc2.metric("Change", "—", help="Appears after second price fetch")
-                pc3.metric("Items tracked", f"{len(rows)} ({priced} priced)")
-                pc4.metric("Total quantity", str(total_qty))
-                st.divider()
+                delta_class = "ticker-delta-up" if port_pct and port_pct > 0 else "ticker-delta-down" if port_pct and port_pct < 0 else "ticker-delta-flat"
+                delta_text = f"+{port_delta:,.2f} (+{port_pct:.1f}%)" if port_delta is not None and port_pct is not None and port_delta >= 0 else f"{port_delta:,.2f} ({port_pct:.1f}%)" if port_delta is not None and port_pct is not None else "—"
 
-                # ── Item cards ──
-                for i in range(0, len(rows), 2):
-                    cols = st.columns(2, gap="medium")
+                st.markdown(
+                    f'<div class="ticker-strip">'
+                    f'<div class="ticker-item"><span class="ticker-label">Portfolio value</span><span class="ticker-value">${total_val:,.2f}</span></div>'
+                    f'<div class="ticker-item"><span class="ticker-label">Change</span><span class="{delta_class}">{delta_text}</span></div>'
+                    f'<div class="ticker-item"><span class="ticker-label">Items</span><span class="ticker-value">{len(rows)}</span></div>'
+                    f'<div class="ticker-item"><span class="ticker-label">Quantity</span><span class="ticker-value">{total_qty}</span></div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+                # ── Trading card grid ──
+                n_cols = 3
+                for i in range(0, len(rows), n_cols):
+                    cols = st.columns(n_cols, gap="medium")
                     for j, col in enumerate(cols):
                         ri = i + j
                         if ri >= len(rows):
                             break
                         r = rows[ri]
                         with col:
-                            st.markdown('<div class="card">', unsafe_allow_html=True)
-                            # Top row: image + name
-                            ic, dc = st.columns([1, 3])
-                            with ic:
-                                if r["image_url"]:
-                                    st.image(r["image_url"], width=130)
-                                else:
-                                    st.markdown('<div class="placeholder-img">🔫</div>',
-                                                unsafe_allow_html=True)
-                            with dc:
-                                mkt_link = market_url(r["name"])
-                                cf_link = csfloat_url(r["name"])
-                                st.markdown(
-                                    f'<a href="{mkt_link}" target="_blank" '
-                                    f'style="text-decoration:none;">'
-                                    f'<div class="item-title">{r["name"]} ↗</div></a>',
-                                    unsafe_allow_html=True)
-                                # Dual price boxes (labels link to respective marketplaces)
-                                steam_box = _price_block_html(
-                                    "Steam Market", r["steam_price"], r["steam_delta"], r["steam_pct"],
-                                    link=mkt_link)
-                                cf_box = _price_block_html(
-                                    "CSFloat", r["cf_price"], r["cf_delta"], r["cf_pct"],
-                                    link=cf_link)
-                                st.markdown(
-                                    f'<div class="price-row">{steam_box}{cf_box}</div>',
-                                    unsafe_allow_html=True)
+                            st.markdown(_trading_card_html(r), unsafe_allow_html=True)
+                            if st.button("Remove from watchlist", key=f"drm_{ri}", type="secondary", use_container_width=True):
+                                remove_from_watchlist(r["name"])
+                                st.cache_data.clear()
+                                st.rerun()
 
-                            # Bottom: qty, total, total delta, remove
-                            qty_str = f"Qty: **{r['qty']}**" if r["qty"] > 0 else "Not in inventory"
-                            total_str = f"Value: **${r['total']:,.2f}**" if r["total"] else ""
-                            td_html = ""
-                            if r["total_delta"] is not None:
-                                td_html = _delta_html(r["total_delta"], None)
-                            parts_md = f"{qty_str}{'  ·  ' + total_str if total_str else ''}"
-                            bc1, bc2 = st.columns([5, 1])
-                            with bc1:
-                                st.caption(parts_md)
-                                if td_html:
-                                    st.markdown(td_html, unsafe_allow_html=True)
-                            with bc2:
-                                if st.button("Remove", key=f"drm_{ri}", type="secondary"):
-                                    remove_from_watchlist(r["name"])
-                                    st.cache_data.clear()
-                                    st.rerun()
-                            st.markdown('</div>', unsafe_allow_html=True)
-
-                # ── Detail table ──
-                st.divider()
-                st.subheader("Detail table")
-                table_rows = []
-                for r in rows:
-                    sd = r["steam_delta"]
-                    cd = r["cf_delta"]
-                    table_rows.append({
-                        "Item": r["name"],
-                        "Market link": market_url(r["name"]),
-                        "Steam (USD)": f"${r['steam_price']:,.2f}" if r["steam_price"] else "—",
-                        "Steam Δ": f"{'+'if sd and sd>0 else ''}{sd:+,.2f}" if sd is not None else "—",
-                        "CSFloat (USD)": f"${r['cf_price']:,.2f}" if r["cf_price"] else "—",
-                        "CSFloat Δ": f"{'+'if cd and cd>0 else ''}{cd:+,.2f}" if cd is not None else "—",
-                        "Qty": r["qty"],
-                        "Total (USD)": f"${r['total']:,.2f}" if r["total"] else "—",
-                    })
-                st.dataframe(
-                    pd.DataFrame(table_rows),
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "Market link": st.column_config.LinkColumn("Market link", display_text="Open ↗"),
-                    },
-                )
+                # ── Detail table (collapsible) ──
+                with st.expander("View detail table (Steam / CSFloat / Qty)"):
+                    table_rows = []
+                    for r in rows:
+                        sd = r["steam_delta"]
+                        cd = r["cf_delta"]
+                        table_rows.append({
+                            "Item": r["name"],
+                            "Market link": market_url(r["name"]),
+                            "Steam (USD)": f"${r['steam_price']:,.2f}" if r["steam_price"] else "—",
+                            "Steam Δ": f"{'+'if sd and sd>0 else ''}{sd:+,.2f}" if sd is not None else "—",
+                            "CSFloat (USD)": f"${r['cf_price']:,.2f}" if r["cf_price"] else "—",
+                            "CSFloat Δ": f"{'+'if cd and cd>0 else ''}{cd:+,.2f}" if cd is not None else "—",
+                            "Qty": r["qty"],
+                            "Total (USD)": f"${r['total']:,.2f}" if r["total"] else "—",
+                        })
+                    st.dataframe(
+                        pd.DataFrame(table_rows),
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Market link": st.column_config.LinkColumn("Market link", display_text="Open ↗"),
+                        },
+                    )
 
             else:
                 st.info("No price data yet. Prices appear after the first fetch cycle.")
