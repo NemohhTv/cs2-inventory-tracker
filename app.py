@@ -252,29 +252,32 @@ def _fetch_steam_market(name: str) -> float | None:
 
 
 def _fetch_csfloat(name: str) -> tuple[float | None, bool]:
-    """Returns (price, was_429)."""
+    """Returns (price_usd, was_429). Price from the cheapest listed item."""
     key = get_csfloat_key()
-    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    if not key:
+        return None, False
+    headers = {"Authorization": key}
     try:
         r = requests.get(CSFLOAT_LISTINGS_URL,
-                         params={"market_hash_name": name, "limit": 1},
-                         headers=headers or None, timeout=10)
+                         params={"market_hash_name": name, "limit": 1,
+                                 "sort_by": "lowest_price", "type": "buy_now"},
+                         headers=headers, timeout=10)
         if r.status_code == 429:
             return None, True
+        if r.status_code == 401:
+            return None, False
         r.raise_for_status()
         data = r.json()
     except (requests.RequestException, ValueError):
         return None, False
-    listings = data if isinstance(data, list) else (data.get("listings") or data.get("data") or [])
+    listings = data if isinstance(data, list) else (data.get("data") or [])
     if not listings:
         return None, False
     first = listings[0] if isinstance(listings[0], dict) else {}
-    p = first.get("price") or first.get("listing_price") or first.get("suggested_price")
-    if p is None:
+    p = first.get("price")
+    if p is None or not isinstance(p, (int, float)):
         return None, False
-    if isinstance(p, (int, float)):
-        return (float(p) / 100.0 if p > 1000 else float(p)), False
-    return None, False
+    return round(float(p) / 100.0, 2), False
 
 
 # =========================================================================
@@ -338,21 +341,26 @@ def fetch_watchlist_data(watchlist: tuple[str, ...], steam_id: str, _cache_bust:
             time.sleep(max(1.0, PRICE_DELAY_SEC))
         steam_prices[name] = _fetch_steam_market(name)
 
-    # Pass 2: CSFloat prices (always attempt, not just as fallback)
+    # Pass 2: CSFloat prices (only if API key is configured)
     cf_prices: dict[str, float | None] = {}
-    for idx, name in enumerate(batch):
-        if csfloat_hit_429:
+    has_cf_key = bool(get_csfloat_key())
+    if has_cf_key:
+        for idx, name in enumerate(batch):
+            if csfloat_hit_429:
+                cf_prices[name] = None
+                continue
+            if idx > 0:
+                time.sleep(max(1.0, PRICE_DELAY_SEC))
+            p, was_429 = _fetch_csfloat(name)
+            if was_429:
+                csfloat_hit_429 = True
+                warnings.append("CSFloat rate-limited — CSFloat prices may be partial.")
+                cf_prices[name] = None
+            else:
+                cf_prices[name] = p
+    else:
+        for name in batch:
             cf_prices[name] = None
-            continue
-        if idx > 0:
-            time.sleep(max(1.0, PRICE_DELAY_SEC))
-        p, was_429 = _fetch_csfloat(name)
-        if was_429:
-            csfloat_hit_429 = True
-            warnings.append("CSFloat rate-limited — CSFloat prices may be partial.")
-            cf_prices[name] = None
-        else:
-            cf_prices[name] = p
 
     # Build rows with deltas
     new_history: dict = {}

@@ -98,24 +98,29 @@ def fetch_steam_market_price(name: str) -> float | None:
 
 def fetch_csfloat_price(name: str) -> tuple[float | None, bool]:
     api_key = get_csfloat_key()
-    params = {"market_hash_name": name, "limit": 1}
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    if not api_key:
+        return None, False
+    headers = {"Authorization": api_key}
+    params = {"market_hash_name": name, "limit": 1,
+              "sort_by": "lowest_price", "type": "buy_now"}
     try:
-        r = requests.get(CSFLOAT_LISTINGS_URL, params=params, headers=headers or None, timeout=10)
+        r = requests.get(CSFLOAT_LISTINGS_URL, params=params, headers=headers, timeout=10)
         if r.status_code == 429:
             return None, True
+        if r.status_code == 401:
+            return None, False
         r.raise_for_status()
         data = r.json()
     except (requests.RequestException, ValueError):
         return None, False
-    listings = data if isinstance(data, list) else (data.get("listings") or data.get("data") or [])
+    listings = data if isinstance(data, list) else (data.get("data") or [])
     if not listings:
         return None, False
     first = listings[0] if isinstance(listings[0], dict) else {}
-    price = first.get("price") or first.get("listing_price") or first.get("suggested_price")
-    if price is None:
+    price = first.get("price")
+    if price is None or not isinstance(price, (int, float)):
         return None, False
-    return (float(price) / 100.0 if price > 1000 else float(price)), False
+    return round(float(price) / 100.0, 2), False
 
 
 def get_price(name: str) -> tuple[float | None, bool]:
